@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Elemental Sandbox · Mobile</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a;font-family:'Segoe UI',Arial,sans-serif;color:#fff;touch-action:manipulation}
+#app{width:100%;height:100%;display:flex;flex-direction:column}
+#canvas-area{flex:1;position:relative;overflow:hidden}
+#canvas{display:block;cursor:crosshair;image-rendering:pixelated;touch-action:none}
+#joystick{position:absolute;bottom:16px;left:16px;width:120px;height:120px;opacity:0.5;pointer-events:auto;z-index:10}
+#joystick-base{width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.2);position:relative}
+#joystick-thumb{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,0.35);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);transition:none}
+#action-btns{position:absolute;bottom:20px;right:12px;display:flex;flex-direction:column;gap:8px;z-index:10}
+.act-btn{width:50px;height:50px;border-radius:50%;border:2px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:#fff;font-size:11px;font-weight:bold;display:flex;align-items:center;justify-content:center;pointer-events:auto}
+.act-btn:active,.act-btn.pressed{background:rgba(233,69,96,0.5);border-color:#e94560}
+#human-select{position:absolute;top:8px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:10}
+.hs-btn{width:38px;height:32px;border-radius:8px;border:2px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#aaa;font-size:13px;font-weight:bold;text-align:center;line-height:28px}
+.hs-btn.active{border-color:#e94560;color:#fff;background:rgba(233,69,96,0.3)}
+#bottom-bar{background:#0f1a2e;border-top:2px solid #1a3050;display:flex;flex-direction:column;max-height:140px;overflow:hidden}
+#mat-row{display:flex;overflow-x:auto;gap:4px;padding:4px;scrollbar-width:none;-ms-overflow-style:none;flex-shrink:0}
+#mat-row::-webkit-scrollbar{display:none}
+.mat-chip{flex-shrink:0;width:40px;height:40px;border-radius:8px;border:2px solid transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:8px;color:#999}
+.mat-chip .dot{width:18px;height:18px;border-radius:4px;border:1px solid rgba(255,255,255,0.15)}
+.mat-chip.active{border-color:#e94560;color:#fff}
+.mat-chip .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:36px;text-align:center}
+#tool-row{display:flex;align-items:center;gap:6px;padding:2px 6px 4px;flex-shrink:0}
+#tool-row label{font-size:10px;color:#667788;white-space:nowrap}
+#tool-row input[type=range]{flex:1;accent-color:#e94560;height:4px}
+.tool-btn{flex-shrink:0;height:28px;padding:0 10px;border-radius:6px;border:2px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#ccc;font-size:10px;font-weight:bold}
+.tool-btn.active{border-color:#e94560;background:rgba(233,69,96,0.2);color:#fff}
+#pause-btn{width:28px;height:28px;border-radius:6px;border:2px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#ccc;font-size:12px;text-align:center;line-height:24px;flex-shrink:0}
+#pause-btn.paused{border-color:#e94560;background:rgba(233,69,96,0.3)}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="canvas-area">
+<canvas id="canvas"></canvas>
+<div id="joystick"><div id="joystick-base"><div id="joystick-thumb"></div></div></div>
+<div id="action-btns">
+<div class="act-btn" id="place-btn">PLACE</div>
+<div class="act-btn" id="jump-btn">JUMP</div>
+</div>
+<div id="human-select">
+<div class="hs-btn active" data-h="0">1</div>
+<div class="hs-btn" data-h="1">2</div>
+<div class="hs-btn" data-h="2">3</div>
+</div>
+</div>
+<div id="bottom-bar">
+<div id="mat-row"></div>
+<div id="tool-row">
+<div id="pause-btn">⏸</div>
+<div class="tool-btn" id="eraser-btn">✕</div>
+<label>B:</label>
+<input type="range" id="brush-slider" min="1" max="10" value="2">
+</div>
+</div>
+</div>
+
+<script>
+// ========== SIMULATION ENGINE (same as desktop) ==========
+const CELL = 6;
+const MAX_ENTITIES = 200;
+const MAX_HUMANS = 3;
+
+const T = {
+  EMPTY:0, DIRT:1, WATER:2, LAVA:3, GRASS:4, STEAM:5, POISON:6, ACID:7,
+  SAPLING:8, WOOD:9, LEAVES:10, STONE:11, FIRE:12, ASH:13, MUD:14,
+  HUMAN:15, COW:16, CHICKEN:17, SHEEP:18, PARROT:19, INSECT:20, DOG:21, CAT:22, TURTLE:23, FISH:24, SHARK:25,
+  OBSIDIAN:26, MONKEY:27, MEAT:28, FRUIT:29, BREAD:30, CAKE:31, CANDY:32, NUTS:33, BANANA:34, LION:35, GORILLA:36, ZOMBIE:37,
+  ICE:38, PENGUIN:39, FOOTBALL:40
+};
+
+const MATERIAL_PROPS = {
+  [T.EMPTY]:{name:'Empty',color:'#000000',state:'empty',cat:'tools'},
+  [T.DIRT]:{name:'Dirt',color:'#8B6914',state:'powder',cat:'materials'},
+  [T.WATER]:{name:'Water',color:'#3366FF',state:'liquid',cat:'materials'},
+  [T.LAVA]:{name:'Lava',color:'#FF4400',state:'liquid',cat:'materials'},
+  [T.GRASS]:{name:'Grass',color:'#33AA33',state:'living',cat:'living'},
+  [T.STEAM]:{name:'Steam',color:'#DDDDDD',state:'gas',cat:'materials',lifespan:120},
+  [T.POISON]:{name:'Poison',color:'#88FF00',state:'liquid',cat:'materials'},
+  [T.ACID]:{name:'Acid',color:'#CCFF00',state:'liquid',cat:'materials'},
+  [T.SAPLING]:{name:'Sapling',color:'#228B22',state:'living',cat:'living'},
+  [T.WOOD]:{name:'Wood',color:'#8B5A2B',state:'solid',cat:'materials'},
+  [T.LEAVES]:{name:'Leaves',color:'#44AA44',state:'solid',cat:'materials'},
+  [T.STONE]:{name:'Stone',color:'#888888',state:'solid',cat:'materials'},
+  [T.OBSIDIAN]:{name:'Obsidian',color:'#5c3d99',state:'solid',cat:'materials'},
+  [T.FIRE]:{name:'Fire',color:'#FF8800',state:'gas',cat:'materials',lifespan:40},
+  [T.ASH]:{name:'Ash',color:'#666666',state:'powder',cat:'materials'},
+  [T.MUD]:{name:'Mud',color:'#6B5B2B',state:'liquid',cat:'materials'},
+  [T.HUMAN]:{name:'Human',color:'#FFCC99',state:'entity',cat:'living'},
+  [T.COW]:{name:'Cow',color:'#FFFFFF',state:'entity',cat:'animals'},
+  [T.CHICKEN]:{name:'Chicken',color:'#FFDD44',state:'entity',cat:'animals'},
+  [T.SHEEP]:{name:'Sheep',color:'#DDDDDD',state:'entity',cat:'animals'},
+  [T.PARROT]:{name:'Parrot',color:'#FF4444',state:'entity',cat:'animals'},
+  [T.INSECT]:{name:'Insect',color:'#442200',state:'entity',cat:'animals'},
+  [T.DOG]:{name:'Dog',color:'#B8860B',state:'entity',cat:'animals'},
+  [T.CAT]:{name:'Cat',color:'#FF8800',state:'entity',cat:'animals'},
+  [T.TURTLE]:{name:'Turtle',color:'#44AA44',state:'entity',cat:'animals'},
+  [T.FISH]:{name:'Fish',color:'#4488FF',state:'entity',cat:'animals'},
+  [T.SHARK]:{name:'Shark',color:'#444488',state:'entity',cat:'animals'},
+  [T.MONKEY]:{name:'Monkey',color:'#8B5A2B',state:'entity',cat:'animals'},
+  [T.MEAT]:{name:'Meat',color:'#CC3333',state:'solid',cat:'food'},
+  [T.FRUIT]:{name:'Fruit',color:'#44DD44',state:'solid',cat:'food'},
+  [T.BREAD]:{name:'Bread',color:'#EEBB55',state:'solid',cat:'food'},
+  [T.CAKE]:{name:'Cake',color:'#FF88AA',state:'solid',cat:'food'},
+  [T.CANDY]:{name:'Candy',color:'#CC44FF',state:'solid',cat:'food'},
+  [T.NUTS]:{name:'Nuts',color:'#AA7733',state:'solid',cat:'food'},
+  [T.BANANA]:{name:'Banana',color:'#FFEE44',state:'solid',cat:'food'},
+  [T.LION]:{name:'Lion',color:'#DAA520',state:'entity',cat:'animals'},
+  [T.GORILLA]:{name:'Gorilla',color:'#444444',state:'entity',cat:'animals'},
+  [T.ZOMBIE]:{name:'Zombie',color:'#5D8A5D',state:'entity',cat:'animals'},
+  [T.ICE]:{name:'Ice',color:'#88DDFF',state:'solid',cat:'materials'},
+  [T.PENGUIN]:{name:'Penguin',color:'#222222',state:'entity',cat:'animals'},
+  [T.FOOTBALL]:{name:'Football',color:'#FFFFFF',state:'entity',cat:'sports'}
+};
+
+const LIQUID_SPREAD = { [T.WATER]:4, [T.LAVA]:2, [T.POISON]:3, [T.ACID]:3, [T.MUD]:1 };
+let COLS, ROWS, grid, moved, extra, entityMap;
+function initGrid(w,h){COLS=w;ROWS=h;const sz=COLS*ROWS;grid=new Uint8Array(sz);moved=new Uint8Array(sz);extra=new Uint16Array(sz);entityMap=new Uint8Array(sz)}
+function idx(x,y){return y*COLS+x}
+function g(x,y){return grid[idx(x,y)]}
+function s(x,y,v){grid[idx(x,y)]=v}
+function inBounds(x,y){return x>=0&&x<COLS&&y>=0&&y<ROWS}
+
+// ========== ENTITY SYSTEM ==========
+let entities=[],nextEntityId=1,selectedHuman=-1,humanIds=[];
+function createEntity(type,x,y){
+  if(entities.length>=MAX_ENTITIES)return null;
+  if(type===T.HUMAN&&humanIds.length>=MAX_HUMANS)return null;
+  const id=nextEntityId++;const e={id,type,x:Math.round(x),y:Math.round(y),dir:1,health:100,age:0,selected:false,targetId:-1,actionCd:0,vy:0,vx:0,bounces:0};
+  entities.push(e);if(type===T.HUMAN){humanIds.push(id);if(selectedHuman<0){selectedHuman=0;e.selected=true}}
+  const p=idx(e.x,e.y);if(inBounds(e.x,e.y))entityMap[p]=id;return e;
+}
+function removeEntity(id){
+  const ei=entities.findIndex(e=>e.id===id);if(ei<0)return;const e=entities[ei];
+  if(e.type===T.HUMAN){const hi=humanIds.indexOf(id);if(hi>=0)humanIds.splice(hi,1);if(e.selected){selectedHuman=-1;if(humanIds.length>0){selectedHuman=0;const h=entities.find(ee=>ee.id===humanIds[0]);if(h)h.selected=true}}}
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const cx=e.x+dx,cy=e.y+dy;if(inBounds(cx,cy)&&entityMap[idx(cx,cy)]===id)entityMap[idx(cx,cy)]=0}
+  entities.splice(ei,1);
+}
+function getEntityAt(gx,gy){const id=entityMap[idx(gx,gy)];if(!id)return null;return entities.find(e=>e.id===id)}
+
+// ========== RENDERING ==========
+const canvas=document.getElementById('canvas');const ctx=canvas.getContext('2d');let imageData,palette;
+function buildPalette(){palette=new Uint32Array(41);for(let i=0;i<41;i++){if(MATERIAL_PROPS[i]){const c=hexToRgba(MATERIAL_PROPS[i].color,255);palette[i]=(c[3]<<24)|(c[2]<<16)|(c[1]<<8)|c[0]}else palette[i]=0}}
+function hexToRgba(hex,a){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return[r,g,b,a]}
+function resizeCanvas(){
+  const area=document.getElementById('canvas-area');const w=area.clientWidth;const h=area.clientHeight;
+  canvas.width=Math.floor(w/CELL)*CELL;canvas.height=Math.floor(h/CELL)*CELL;
+  initGrid(Math.floor(w/CELL),Math.floor(h/CELL));imageData=ctx.createImageData(canvas.width,canvas.height);buildPalette();
+}
+function render(){
+  const data=imageData.data;const w=canvas.width;const h32=new Uint32Array(data.buffer);
+  h32.fill(palette[T.EMPTY]||0);
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){const t=grid[idx(x,y)];if(t===T.EMPTY)continue;const color=palette[t];if(!color)continue;const px=x*CELL,py=y*CELL;for(let dy=0;dy<CELL;dy++){const off=(py+dy)*w+px;for(let dx=0;dx<CELL;dx++)h32[off+dx]=color}}
+  // Food icons
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){const t=grid[idx(x,y)];if(t>=T.MEAT&&t<=T.BANANA)drawFoodIcon(t,x*CELL,y*CELL,h32,w)}
+  for(const e of entities)drawEntitySimple(e,h32,w);
+  ctx.putImageData(imageData,0,0);
+}
+function drawFoodIcon(type,px,py,h32,w){
+  function sp(dx,dy,c){const i=(py+dy)*w+px+dx;if(i<h32.length)h32[i]=c}
+  if(type===T.MEAT){sp(1,1,0xFF3344CC);sp(2,1,0xFF3344CC);sp(3,1,0xFF3344CC);sp(1,2,0xFF3344CC);sp(2,2,0xFFDDEEFF);sp(3,2,0xFF3344CC);sp(1,3,0xFF3344CC);sp(2,3,0xFF3344CC);sp(3,3,0xFF3344CC);return}
+  if(type===T.FRUIT){sp(2,1,0xFF44DD44);sp(1,2,0xFF44DD44);sp(2,2,0xFF44DD44);sp(3,2,0xFF44DD44);sp(1,3,0xFF44DD44);sp(2,3,0xFF66FF66);sp(3,3,0xFF44DD44);sp(2,4,0xFF44DD44);return}
+  if(type===T.BREAD){for(let dy=1;dy<=4;dy++)for(let dx=1;dx<=4;dx++)sp(dx,dy,0xFFEEBB55);return}
+  if(type===T.CAKE){for(let dy=1;dy<=4;dy++)for(let dx=1;dx<=4;dx++)sp(dx,dy,0xFFEE88AA);sp(1,1,0xFFFFFFFF);sp(2,1,0xFFFFFFFF);sp(3,1,0xFFFFFFFF);return}
+  if(type===T.CANDY){for(let dy=1;dy<=4;dy++)for(let dx=1;dx<=4;dx++)sp(dx,dy,0xFFCC44FF);sp(2,2,0xFFFF88EE);sp(3,3,0xFFFF88EE);return}
+  if(type===T.NUTS){sp(1,2,0xFFAA7733);sp(2,2,0xFFAA7733);sp(3,2,0xFFAA7733);return}
+  if(type===T.BANANA){sp(2,1,0xFFEEEE44);sp(1,2,0xFFEEEE44);sp(2,2,0xFFEEEE44);sp(3,2,0xFFEEEE44);sp(1,3,0xFFEEEE44);sp(2,3,0xFFEEEE44);sp(3,3,0xFFEEEE44);return}
+}
+function drawEntitySimple(e,h32,w){
+  const px=e.x*CELL,py=e.y*CELL;const c=palette[e.type]||0xFF888888;
+  // Simple colored rectangle for all entities
+  const siz=e.type===T.LION?4:e.type===T.GORILLA?4:e.type===T.ZOMBIE?3:e.type===T.PENGUIN?3:e.type===T.HUMAN?2:2;
+  for(let dy=0;dy<CELL*siz&&py+dy<canvas.height;dy++){const off=(py+dy)*w+px;for(let dx=0;dx<CELL*siz&&px+dx<canvas.width;dx++)h32[off+dx]=c}
+}
+
+// ========== SIMULATION (simplified - same physics) ==========
+let simStep=0;
+function updateSimulation(){
+  const altDir=(simStep&1)===0;moved.fill(0);
+  for(let y=ROWS-1;y>=0;y--){const startX=altDir?0:COLS-1;const endX=altDir?COLS-1:0;const inc=altDir?1:-1;for(let x=startX;(altDir?x<=endX:x>=endX);x+=inc){const i=idx(x,y);if(moved[i]||entityMap[i]!==0)continue;const t=grid[i];if(t===T.EMPTY)continue;const prop=MATERIAL_PROPS[t];if(!prop)continue;switch(prop.state){case'powder':updatePowder(x,y,t);break;case'liquid':updateLiquid(x,y,t);break;case'gas':updateGas(x,y,t);break;case'living':updateLiving(x,y,t);break;case'solid':updateSolid(x,y,t);break}}}
+  updateEntities();simStep++;
+  if(simStep%2===0)for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){const i=idx(x,y);const t=grid[i];const prop=MATERIAL_PROPS[t];if(prop&&prop.lifespan){extra[i]++;if(extra[i]>=prop.lifespan)grid[i]=T.EMPTY}}
+  if(simStep%60===0&&entities.filter(e=>e.type===T.INSECT).length<10)for(let a=0;a<5;a++){const rx=Math.floor(Math.random()*COLS),ry=Math.floor(Math.random()*ROWS);if(g(rx,ry)===T.GRASS&&entityMap[idx(rx,ry)]===0&&ry>0&&g(rx,ry-1)===T.EMPTY){createEntity(T.INSECT,rx,ry-1);break}}
+}
+function updatePowder(x,y,t){tryMove(x,y,0,1,t)||tryMove(x,y,-1,1,t)||tryMove(x,y,1,1,t)||tryMove(x,y,-1,0,t)||tryMove(x,y,1,0,t)}
+function updateLiquid(x,y,t){checkInteractions(x,y,t);if(g(x,y)!==t)return;if(tryMove(x,y,0,1,t))return;const spread=LIQUID_SPREAD[t]||2;for(let d=1;d<=spread;d++){if(tryMove(x,y,-d,0,t))return;if(tryMove(x,y,d,0,t))return}}
+function updateGas(x,y,t){tryMove(x,y,0,-1,t)||tryMove(x,y,-1,-1,t)||tryMove(x,y,1,-1,t)||tryMove(x,y,-1,0,t)||tryMove(x,y,1,0,t);checkInteractions(x,y,t)}
+function updateLiving(x,y,t){if(t===T.GRASS)updateGrass(x,y);else if(t===T.SAPLING)updateSapling(x,y)}
+function updateGrass(x,y){if(Math.random()>0.05)return;const ns=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]];for(let i=ns.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[ns[i],ns[j]]=[ns[j],ns[i]]}for(const[dx,dy]of ns){const nx=x+dx,ny=y+dy;if(inBounds(nx,ny)&&g(nx,ny)===T.DIRT&&entityMap[idx(nx,ny)]===0){s(nx,ny,T.GRASS);break}}}
+function updateSapling(x,y){if(y+1>=ROWS)return;const below=g(x,y+1);if(below!==T.DIRT&&below!==T.GRASS&&below!==T.STONE&&below!==T.MUD)return;if(Math.random()>0.05)return;let hw=false;for(let dy=-3;dy<=3;dy++)for(let dx=-3;dx<=3;dx++){const nx=x+dx,ny=y+dy;if(inBounds(nx,ny)&&(g(nx,ny)===T.WATER||g(nx,ny)===T.MUD)){hw=true;break}}if(!hw)return;s(x,y,T.WOOD);for(let h=1;h<=3;h++)if(y-h>=0&&g(x,y-h)===T.EMPTY)s(x,y-h,T.WOOD);for(let dx=-1;dx<=1;dx++)for(let dy=-2;dy<=0;dy++){const nx=x+dx,ny=y+dy;if(inBounds(nx,ny)&&g(nx,ny)===T.EMPTY&&Math.random()<0.7)s(nx,ny,T.LEAVES)}}
+function updateSolid(x,y,t){checkInteractions(x,y,t)}
+function tryMove(x,y,dx,dy,t){const nx=x+dx,ny=y+dy;if(!inBounds(nx,ny))return false;const ni=idx(nx,ny);if(grid[ni]!==T.EMPTY||entityMap[ni]!==0)return false;const i=idx(x,y);grid[ni]=t;extra[ni]=extra[i];grid[i]=T.EMPTY;extra[i]=0;moved[ni]=1;return true}
+function checkInteractions(x,y,t){
+  if(t===T.EMPTY)return;
+  for(const[dx,dy]of[[-1,0],[1,0],[0,-1],[0,1]]){
+    const nx=x+dx,ny=y+dy;if(!inBounds(nx,ny))continue;const nt=g(nx,ny);if(nt===T.EMPTY)continue;
+    if(t===T.ACID||nt===T.ACID){if(nt===T.ACID){s(x,y,T.EMPTY);return}else if(t===T.ACID){s(nx,ny,T.EMPTY);if(Math.random()<0.3)s(x,y,T.EMPTY);return}}
+    if((t===T.WATER&&nt===T.LAVA)||(t===T.LAVA&&nt===T.WATER)){s(x,y,T.OBSIDIAN);s(nx,ny,T.OBSIDIAN);return}
+    if(t===T.LAVA&&(nt===T.WOOD||nt===T.LEAVES||nt===T.GRASS||nt===T.SAPLING)){s(nx,ny,T.FIRE);return}
+    if(nt===T.LAVA&&(t===T.WOOD||t===T.LEAVES||t===T.GRASS||t===T.SAPLING)){s(x,y,T.FIRE);return}
+    if(t===T.FIRE&&(nt===T.WOOD||nt===T.LEAVES||nt===T.GRASS||nt===T.SAPLING)){s(nx,ny,T.FIRE);return}
+    if(nt===T.FIRE&&(t===T.WOOD||t===T.LEAVES||t===T.GRASS||t===T.SAPLING)){s(x,y,T.FIRE);return}
+    if(nt===T.ICE&&(t===T.FIRE||t===T.LAVA)){s(nx,ny,T.WATER);if(t===T.FIRE)s(x,y,T.EMPTY);return}
+    if(t===T.ICE&&(nt===T.FIRE||nt===T.LAVA)){s(x,y,T.WATER);if(nt===T.FIRE)s(nx,ny,T.EMPTY);return}
+    if((t===T.WATER&&nt===T.DIRT)||(t===T.DIRT&&nt===T.WATER)){s(x,y,T.MUD);s(nx,ny,T.MUD);return}
+  }
+}
+function checkEntityInteractions(x,y){
+  const cp=(cx,cy)=>{if(!inBounds(cx,cy))return;const nt=g(cx,cy);let dmg=0;if(nt===T.ACID)dmg=8;else if(nt===T.LAVA)dmg=5;else if(nt===T.POISON)dmg=3;else if(nt===T.FIRE)dmg=2;if(dmg>0){const e=getEntityAt(x,y);if(e){e.health-=dmg;if(e.health<=0){s(x,y,T.ASH);removeEntity(e.id)}}}};
+  cp(x,y);for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(dx===0&&dy===0)continue;cp(x+dx,y+dy)}
+}
+function entityMoveTo(e,nx,ny){
+  if(!inBounds(nx,ny))return false;const ni=idx(nx,ny);const nt=grid[ni];
+  if(nt===T.STONE||nt===T.WOOD||nt===T.LEAVES||nt===T.GRASS||nt===T.SAPLING||nt===T.OBSIDIAN||nt===T.ICE)return false;
+  if(entityMap[ni]!==0){const de=entities.find(ee=>ee.id===entityMap[ni]);if(de&&de.type===T.FOOTBALL){de.vx=(de.vx||0)+(nx-e.x)*4;de.vy=(de.vy||0)+(ny-e.y)*3-1.5;de.bounces=5;entityMap[idx(e.x,e.y)]=0;e.x=nx;e.y=ny;entityMap[ni]=e.id;e.dir=nx-e.x;return true}return false}
+  entityMap[idx(e.x,e.y)]=0;e.x=nx;e.y=ny;entityMap[ni]=e.id;e.dir=nx-e.x-(e.x===nx?0:e.dir);return true;
+}
+function applyGravity(e){if(e.health<=0||(e.age&1)!==0)return;const ct=g(e.x,e.y);if(e.vy<3)e.vy+=ct===T.WATER?0.3:0.6;const st=Math.floor(e.vy);for(let s=0;s<st;s++){const ny=e.y+1;if(!inBounds(e.x,ny)){e.vy=0;break}const nt=g(e.x,ny);if(nt===T.STONE||nt===T.WOOD||nt===T.LEAVES||nt===T.GRASS||nt===T.SAPLING||nt===T.DIRT||nt===T.OBSIDIAN||nt===T.MEAT||nt===T.FRUIT||nt===T.BREAD||nt===T.CAKE||nt===T.CANDY||nt===T.NUTS||nt===T.BANANA||entityMap[idx(e.x,ny)]!==0){e.vy=0;break}if(nt===T.EMPTY||nt===T.WATER||nt===T.MUD||nt===T.ASH){if(!entityMoveTo(e,e.x,ny)){e.vy=0;break}}else{e.vy=0;break}}if(e.vy===0&&inBounds(e.x,e.y+1)){const nt=g(e.x,e.y+1);if(nt===T.EMPTY||nt===T.WATER)e.vy=0.1}}
+function entityRandomWalk(e,spd){if(e.actionCd>0)return;const d=[[0,1],[0,-1],[1,0],[-1,0]][Math.floor(Math.random()*4)];if(entityMoveTo(e,e.x+d[0],e.y+d[1]))e.actionCd=spd}
+function entityWalkToward(e,tx,ty,spd){if(e.actionCd>0)return;const dx=Math.sign(tx-e.x),dy=Math.sign(ty-e.y);if(dx!==0&&entityMoveTo(e,e.x+dx,e.y)){e.actionCd=spd;return}if(dy!==0&&entityMoveTo(e,e.x,e.y+dy)){e.actionCd=spd}}
+function tryEatFood(e,heal,cd,fts){
+  for(const[dx,dy]of[[-1,0],[1,0],[0,-1],[0,1]]){const nx=e.x+dx,ny=e.y+dy;if(inBounds(nx,ny)){const ct=g(nx,ny);for(const ft of fts)if(ct===ft){s(nx,ny,T.EMPTY);e.health=Math.min(100,e.health+heal);e.actionCd=cd;return true}}}return false;
+}
+function seekFood(e,range,fts){
+  let fx=-1,fy=-1,fd=Infinity;
+  for(let dy=-range;dy<=range;dy++)for(let dx=-range;dx<=range;dx++){const nx=e.x+dx,ny=e.y+dy;if(inBounds(nx,ny)){const ct=g(nx,ny);for(const ft of fts)if(ct===ft){const d=Math.abs(dx)+Math.abs(dy);if(d<fd){fd=d;fx=nx;fy=ny}}}}
+  if(fx>=0&&fd>1&&fd<=range){entityWalkToward(e,fx,fy,5);return true}return false;
+}
+function updateHumanPhysics(e){
+  if(e.health<=0||(e.age&1)!==0)return;const ct=g(e.x,e.y);
+  if(e.vy<3)e.vy+=ct===T.WATER?0.3:0.6;const st=Math.floor(e.vy);
+  for(let s=0;s<st;s++){const ny=e.y+1;if(!inBounds(e.x,ny)){e.vy=0;break}const nt=g(e.x,ny);
+    if(nt===T.STONE||nt===T.WOOD||nt===T.LEAVES||nt===T.GRASS||nt===T.SAPLING||nt===T.OBSIDIAN||nt===T.MEAT||nt===T.FRUIT||nt===T.BREAD||nt===T.CAKE||nt===T.CANDY||nt===T.NUTS||nt===T.BANANA||entityMap[idx(e.x,ny)]!==0){e.vy=0;break}
+    if(nt===T.EMPTY||nt===T.WATER||nt===T.MUD){if(!entityMoveTo(e,e.x,ny)){e.vy=0;break}}else if(nt===T.DIRT||nt===T.ASH){e.vy=0;break}else{e.vy=0;break}}
+  if(e.vy===0&&inBounds(e.x,e.y+1)){const nt=g(e.x,e.y+1);if(nt===T.EMPTY||nt===T.WATER)e.vy=0.1}
+}
+function moveHuman(dx,dy){
+  if(selectedHuman<0)return;const e=entities.find(ee=>ee.id===humanIds[selectedHuman]);if(!e||e.health<=0)return;
+  const nx=e.x+dx,ny=e.y+dy;if(!inBounds(nx,ny))return;const nt=g(nx,ny);
+  if(nt===T.STONE||nt===T.WOOD||nt===T.LEAVES||nt===T.GRASS||nt===T.SAPLING||nt===T.OBSIDIAN||nt===T.ICE)return;
+  if(entityMap[idx(nx,ny)]!==0)return;
+  if(dy!==0){if(nt===T.EMPTY||nt===T.WATER||nt===T.MUD){entityMoveTo(e,nx,ny);if(dy<0)e.vy=-0.5;return}
+  if(dy<0&&(nt===T.DIRT||nt===T.ASH)&&inBounds(nx,ny-1)&&g(nx,ny-1)===T.EMPTY&&entityMap[idx(nx,ny-1)]===0){s(nx,ny-1,nt);s(nx,ny,T.EMPTY);entityMoveTo(e,nx,ny);return}return}
+  if(nt===T.EMPTY||nt===T.WATER||nt===T.MUD||nt===T.DIRT||nt===T.ASH){if((nt===T.DIRT||nt===T.ASH)&&inBounds(nx,ny-1)&&g(nx,ny-1)===T.EMPTY&&entityMap[idx(nx,ny-1)]===0){s(nx,ny-1,nt);s(nx,ny,T.EMPTY)}entityMoveTo(e,nx,ny)}
+}
+// Simplified animal AI
+function updateEntities(){
+  for(let i=entities.length-1;i>=0;i--){const e=entities[i];e.age++;e.actionCd=Math.max(0,e.actionCd-1);
+    checkEntityInteractions(e.x,e.y);if(e.health<=0){removeEntity(e.id);continue}
+    if(e.type===T.HUMAN)updateHumanPhysics(e);
+    else if(e.type===T.COW||e.type===T.SHEEP){applyGravity(e);if(e.actionCd===0){if(!tryEatFood(e,10,12,[T.FRUIT,T.BREAD,T.CAKE])){for(const[dx,dy]of[[-1,0],[1,0],[0,-1],[0,1]]){if(inBounds(e.x+dx,e.y+dy)&&g(e.x+dx,e.y+dy)===T.GRASS){s(e.x+dx,e.y+dy,T.DIRT);e.health=Math.min(100,e.health+10);e.actionCd=15;break}}if(e.actionCd===0){if(!seekFood(e,6,[T.FRUIT,T.BREAD,T.CAKE]))entityRandomWalk(e,6)}}}}
+    else if(e.type===T.CHICKEN){applyGravity(e);if(e.actionCd===0){if(!tryEatFood(e,5,8,[T.BREAD,T.FRUIT,T.NUTS,T.CAKE])){if(Math.random()<0.2)for(const[dx,dy]of[[-1,0],[1,0],[0,-1],[0,1]]){if(inBounds(e.x+dx,e.y+dy)&&g(e.x+dx,e.y+dy)===T.DIRT&&Math.random()<0.3){s(e.x+dx,e.y+dy,T.EMPTY);e.actionCd=10;break}}if(e.actionCd===0){if(!seekFood(e,5,[T.BREAD,T.FRUIT,T.NUTS,T.CAKE]))entityRandomWalk(e,5)}}}}
+    else if(e.type===T.PARROT){applyGravity(e);if(e.actionCd===0){if(!tryEatFood(e,5,10,[T.FRUIT,T.BREAD,T.CAKE])){if(Math.random()<0.4&&entityMoveTo(e,e.x,e.y-1))e.actionCd=4;else{if(!seekFood(e,4,[T.FRUIT,T.BREAD,T.CAKE]))entityRandomWalk(e,5)}}}}
+    else if(e.type===T.INSECT){if(e.actionCd===0){const d=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]][Math.floor(Math.random()*8)];if(entityMoveTo(e,e.x+d[0],e.y+d[1]))e.actionCd=2}}
+    else if(e.type===T.DOG){applyGravity(e);if(e.actionCd===0){if(!tryEatFood(e,8,8,[T.MEAT,T.CAKE])){let n=null,nd=Infinity;for(const hid of humanIds){const he=entities.find(ee=>ee.id===hid);if(he){const d=Math.abs(he.x-e.x)+Math.abs(he.y-e.y);if(d<nd){nd=d;n=he}}}if(n&&nd<30)entityWalkToward(e,n.x,n.y,4);else{if(!seekFood(e,6,[T.MEAT,T.CAKE]))entityRandomWalk(e,6)}}}}
+    else if(e.type===T.CAT){applyGravity(e);if(e.actionCd===0){if(!tryEatFood(e,6,10,[T.MEAT,T.CAKE])){let av=false;for(const[dx,dy]of[[-1,0],[1,0],[0,-1],[0,1]]){if(inBounds(e.x+dx,e.y+dy)&&g(e.x+dx,e.y+dy)===T.WATER){entityMoveTo(e,e.x-dx*2,e.y-dy*2)||entityRandomWalk(e,8);e.actionCd=8;av=true;break}}if(!av){if(!seekFood(e,6,[T.MEAT,T.CAKE]))entityRandomWalk(e,7)}}}}
+    else if(e.type===T.TURTLE){applyGravity(e);if(e.actionCd===0){if(!tryEatFood(e,8,15,[T.FRUIT,T.BREAD,T.CAKE])){const d=[[0,1],[0,-1],[1,0],[-1,0]][Math.floor(Math.random()*4)];const nx=e.x+d[0],ny=e.y+d[1];if(inBounds(nx,ny)&&(g(nx,ny)===T.EMPTY||g(nx,ny)===T.WATER)){entityMoveTo(e,nx,ny);e.actionCd=10}}}}
+    else if(e.type===T.MONKEY){applyGravity(e);if(e.actionCd===0){if(!tryEatFood(e,12,8,[T.FRUIT,T.BREAD,T.MEAT,T.NUTS,T.CAKE,T.CANDY])){if(!seekFood(e,5,[T.FRUIT,T.BREAD,T.MEAT,T.NUTS,T.CAKE,T.CANDY,T.BANANA]))entityRandomWalk(e,6)}}}
+    else if(e.type===T.LION){applyGravity(e);if(e.actionCd===0){if(!tryEatFood(e,10,10,[T.MEAT,T.CAKE])){let pr=null,pd=Infinity;for(const ee of entities){if(ee.type===T.COW||ee.type===T.SHEEP||ee.type===T.CHICKEN||ee.type===T.PARROT){const d=Math.abs(ee.x-e.x)+Math.abs(ee.y-e.y);if(d<pd&&d<30){pd=d;pr=ee}}}if(pr){const spd=pd<8?2:3;entityWalkToward(e,pr.x,pr.y,spd);if(Math.abs(e.x-pr.x)<=1&&Math.abs(e.y-pr.y)<=1){removeEntity(pr.id);e.health=Math.min(100,e.health+25);e.actionCd=5}}else entityRandomWalk(e,8)}}}
+    else if(e.type===T.GORILLA){applyGravity(e);if(e.actionCd===0){if(!tryEatFood(e,14,10,[T.FRUIT,T.BREAD,T.CAKE,T.BANANA])){let found=false;for(const[dx,dy]of[[-1,0],[1,0],[0,-1],[0,1]]){if(inBounds(e.x+dx,e.y+dy)){const nt=g(e.x+dx,e.y+dy);if(nt===T.LAVA||nt===T.ACID||nt===T.FIRE||nt===T.POISON){s(e.x+dx,e.y+dy,T.DIRT);e.actionCd=6;found=true;break}}}if(!found){if(!seekFood(e,5,[T.FRUIT,T.BREAD,T.CAKE,T.BANANA]))entityRandomWalk(e,7)}}}}
+    else if(e.type===T.ZOMBIE){applyGravity(e);if(e.actionCd===0){let pr=null,pd=Infinity;for(const ee of entities){if(ee.id===e.id)continue;if(ee.type!==T.ZOMBIE&&ee.type!==T.SHARK&&ee.type!==T.FISH&&ee.type!==T.INSECT){const d=Math.abs(ee.x-e.x)+Math.abs(ee.y-e.y);if(d<pd&&d<30){pd=d;pr=ee}}}if(pr){entityWalkToward(e,pr.x,pr.y,8);if(Math.abs(e.x-pr.x)<=1&&Math.abs(e.y-pr.y)<=1){pr.health-=15;e.health=Math.min(100,e.health+5);e.actionCd=5;if(pr.health<=0){removeEntity(pr.id);e.health=Math.min(100,e.health+15)}}}else entityRandomWalk(e,10)}}
+    else if(e.type===T.FISH||e.type===T.SHARK){if(e.actionCd===0){if(e.age<30)continue;const ct=g(e.x,e.y);if(ct!==T.WATER){e.health-=e.type===T.SHARK?0.4:0.3}else{if(e.type===T.SHARK){let tgt=null,td=Infinity;for(const ee of entities)if(ee.type===T.FISH){const d=Math.abs(ee.x-e.x)+Math.abs(ee.y-e.y);if(d<td&&d<25){td=d;tgt=ee}}if(tgt){entityWalkToward(e,tgt.x,tgt.y,4);if(Math.abs(e.x-tgt.x)<=1&&Math.abs(e.y-tgt.y)<=1){removeEntity(tgt.id);e.health=Math.min(100,e.health+20)}}else{rndSwim(e,5)}}else{if(!tryEatFood(e,5,10,[T.BREAD,T.FRUIT,T.CAKE])){if(!seekFood(e,4,[T.BREAD,T.FRUIT,T.CAKE]))rndSwim(e,4)}}}}}
+    else if(e.type===T.PENGUIN){applyGravity(e);if(e.actionCd===0){if(e.age<20)continue;const ct=g(e.x,e.y);if(ct===T.WATER){if(!tryEatFood(e,6,10,[T.BREAD,T.FRUIT,T.CAKE])){if(!seekFood(e,6,[T.BREAD,T.FRUIT,T.CAKE]))rndSwim(e,4)}}else{if(!tryEatFood(e,6,10,[T.BREAD,T.FRUIT,T.CAKE])){if(!seekFood(e,6,[T.BREAD,T.FRUIT,T.CAKE]))entityRandomWalk(e,7)}}}}
+    else if(e.type===T.FOOTBALL){updateFootball(e)}
+    if(e.health<=0){removeEntity(e.id);continue}
+    if(e.type===T.INSECT&&e.age>400){removeEntity(e.id)}
+  }
+}
+function rndSwim(e,spd){const d=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]][Math.floor(Math.random()*8)];const nx=e.x+d[0],ny=e.y+d[1];if(inBounds(nx,ny)&&entityMap[idx(nx,ny)]===0&&g(nx,ny)===T.WATER){entityMoveTo(e,nx,ny);e.actionCd=spd}}
+function updateFootball(e){
+  if(e.vx===undefined)e.vx=0;if(e.vy===undefined)e.vy=0;if(e.bounces===undefined)e.bounces=0;
+  if(e.vy<5)e.vy+=0.4;e.vx*=0.92;if(Math.abs(e.vx)<0.1)e.vx=0;
+  if(e.vx!==0){const sg=Math.sign(e.vx);for(let s=0;s<Math.ceil(Math.abs(e.vx))&&Math.abs(e.vx)>0.1;s++){const nx=e.x+sg;if(!inBounds(nx,e.y)){e.vx*=-0.5;break}const nt=g(nx,e.y);if(nt===T.STONE||nt===T.WOOD||nt===T.LEAVES||nt===T.GRASS||nt===T.SAPLING||nt===T.OBSIDIAN||entityMap[idx(nx,e.y)]!==0){e.vx*=-0.5;break}if(nt===T.EMPTY||nt===T.WATER||nt===T.MUD||nt===T.ASH||nt===T.DIRT){entityMap[idx(e.x,e.y)]=0;e.x=nx;entityMap[idx(nx,e.y)]=e.id}else{e.vx=0;break}}}
+  if(e.vy!==0){const sg=Math.sign(e.vy);for(let s=0;s<Math.ceil(Math.abs(e.vy));s++){const ny=e.y+sg;if(!inBounds(e.x,ny)){e.vy*=-0.3;break}const nt=g(e.x,ny);if(nt===T.STONE||nt===T.WOOD||nt===T.LEAVES||nt===T.GRASS||nt===T.SAPLING||nt===T.OBSIDIAN||nt===T.DIRT||entityMap[idx(e.x,ny)]!==0){e.vy*=-0.5;if(Math.abs(e.vy)<0.5)e.vy=0;if(e.bounces>0)e.bounces--;break}if(nt===T.EMPTY||nt===T.WATER||nt===T.MUD||nt===T.ASH){entityMap[idx(e.x,e.y)]=0;e.y=ny;entityMap[idx(e.x,ny)]=e.id}else{e.vy=0;break}}}
+  if(e.vy===0&&Math.abs(e.vx)<0.2&&e.bounces<=0)e.vx=0;
+}
+
+// ========== MOBILE UI ==========
+let currentMaterial=T.DIRT,brushSize=2,isErasing=false;
+function buildMaterialRow(){
+  const row=document.getElementById('mat-row');row.innerHTML='';
+  const cats={materials:'Materials',living:'Living',animals:'Animals',food:'Food',sports:'Sports'};
+  for(const[catId,catName]of Object.entries(cats)){
+    const types=Object.keys(MATERIAL_PROPS).filter(k=>MATERIAL_PROPS[k].cat===catId).map(Number);
+    for(const t of types){const p=MATERIAL_PROPS[t];
+      const chip=document.createElement('div');chip.className='mat-chip'+(t===currentMaterial?' active':'');
+      chip.innerHTML=`<div class="dot" style="background:${p.color}"></div><span class="lbl">${p.name}</span>`;
+      chip.onclick=()=>{document.querySelectorAll('.mat-chip').forEach(c=>c.classList.remove('active'));chip.classList.add('active');currentMaterial=t;isErasing=false;document.getElementById('eraser-btn').classList.remove('active')};
+      row.appendChild(chip);
+    }
+  }
+}
+function selectHuman(idx){
+  if(idx>=humanIds.length)return;
+  humanIds.forEach((id,i)=>{const e=entities.find(ee=>ee.id===id);if(e)e.selected=(i===idx)});
+  selectedHuman=idx;
+  document.querySelectorAll('.hs-btn').forEach((b,i)=>b.classList.toggle('active',i===idx));
+}
+
+// ========== JOYSTICK ==========
+const joystick=document.getElementById('joystick'),jBase=document.getElementById('joystick-base'),jThumb=document.getElementById('joystick-thumb');
+let joyId=null,joyCX=0,joyCY=0,joyDX=0,joyDY=0;
+function getJoystickCenter(){
+  const r=jBase.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};
+}
+jBase.addEventListener('pointerdown',e=>{joyId=e.pointerId;jBase.setPointerCapture(e.pointerId);const c=getJoystickCenter();joyCX=c.x;joyCY=c.y;e.preventDefault()});
+jBase.addEventListener('pointermove',e=>{if(e.pointerId!==joyId)return;const r=50;let dx=e.clientX-joyCX,dy=e.clientY-joyCY;const dist=Math.sqrt(dx*dx+dy*dy);if(dist>r){dx=dx/dist*r;dy=dy/dist*r}jThumb.style.transform=`translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;joyDX=dx/r;joyDY=dy/r;e.preventDefault()});
+jBase.addEventListener('pointerup',e=>{if(e.pointerId!==joyId)return;joyId=null;jThumb.style.transform='translate(-50%,-50%)';joyDX=0;joyDY=0;e.preventDefault()});
+jBase.addEventListener('pointercancel',e=>{joyId=null;jThumb.style.transform='translate(-50%,-50%)';joyDX=0;joyDY=0});
+
+// ========== ACTION BUTTONS ==========
+function setupActBtn(id, onDown, onUp){
+  const btn=document.getElementById(id);
+  btn.addEventListener('pointerdown',e=>{btn.classList.add('pressed');onDown();e.preventDefault()});
+  btn.addEventListener('pointerup',e=>{btn.classList.remove('pressed');onUp();e.preventDefault()});
+  btn.addEventListener('pointerleave',e=>{btn.classList.remove('pressed');onUp()});
+  btn.addEventListener('pointercancel',e=>{btn.classList.remove('pressed');onUp()});
+}
+let placeHeld=false,jumpHeld=false;
+setupActBtn('place-btn',()=>{placeHeld=true},()=>{placeHeld=false});
+setupActBtn('jump-btn',()=>{jumpHeld=true},()=>{jumpHeld=false});
+
+// ========== TOOLBAR ==========
+document.getElementById('eraser-btn').onclick=function(){isErasing=!isErasing;this.classList.toggle('active',isErasing);if(isErasing){document.querySelectorAll('.mat-chip').forEach(c=>c.classList.remove('active'));currentMaterial=T.EMPTY}};
+document.getElementById('brush-slider').oninput=function(){brushSize=parseInt(this.value)};
+document.getElementById('pause-btn').onclick=function(){paused=!paused;this.classList.toggle('paused',paused);this.textContent=paused?'▶':'⏸'};
+
+// ========== HUMAN SELECTOR ==========
+document.querySelectorAll('.hs-btn').forEach(b=>{b.onclick=()=>selectHuman(parseInt(b.dataset.h))});
+
+// ========== CANVAS TOUCH PAINTING ==========
+let paintId=null,eraserPaint=false;
+function getCanvasXY(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}
+function placeAt(mx,my){
+  const cx=Math.floor(mx/CELL),cy=Math.floor(my/CELL);const r=brushSize;
+  if(MATERIAL_PROPS[currentMaterial]&&MATERIAL_PROPS[currentMaterial].state==='entity'){placeEntityAt(cx,cy);return}
+  for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){if(Math.sqrt(dx*dx+dy*dy)>r+0.5)continue;const px=cx+dx,py=cy+dy;if(!inBounds(px,py))continue;const i=idx(px,py);
+    if(isErasing){if(entityMap[i]!==0)removeEntity(entityMap[i]);grid[i]=T.EMPTY;extra[i]=0}else{if(grid[i]===T.EMPTY&&entityMap[i]===0)grid[i]=currentMaterial}}
+}
+function placeEntityAt(cx,cy){
+  if(!inBounds(cx,cy)||entityMap[idx(cx,cy)]!==0)return;const gt=g(cx,cy);
+  if(currentMaterial===T.FISH||currentMaterial===T.SHARK){
+    const ps=currentMaterial===T.SHARK?4:3;
+    for(let ly=0;ly<5;ly++)for(let dy=-ps;dy<=ps;dy++)for(let dx=-ps;dx<=ps;dx++){const nx=cx+dx,ny=cy+dy+ly;if(inBounds(nx,ny)&&g(nx,ny)===T.EMPTY&&entityMap[idx(nx,ny)]===0&&Math.sqrt(dx*dx+dy*dy)<=ps)s(nx,ny,T.WATER)}
+    for(let dx=-ps-1;dx<=ps+1;dx++)for(let ly=0;ly<2;ly++){const bx=cx+dx,by=cy+5+ly;if(inBounds(bx,by)&&g(bx,by)===T.EMPTY&&entityMap[idx(bx,by)]===0)s(bx,by,T.DIRT)}
+  }
+  if(currentMaterial===T.HUMAN)createEntity(T.HUMAN,cx,cy);else createEntity(currentMaterial,cx,cy);
+}
+canvas.addEventListener('pointerdown',e=>{paintId=e.pointerId;canvas.setPointerCapture(e.pointerId);const p=getCanvasXY(e);placeAt(p.x,p.y);e.preventDefault()});
+canvas.addEventListener('pointermove',e=>{if(e.pointerId!==paintId)return;const p=getCanvasXY(e);placeAt(p.x,p.y);e.preventDefault()});
+canvas.addEventListener('pointerup',e=>{if(e.pointerId!==paintId)return;paintId=null;e.preventDefault()});
+canvas.addEventListener('pointercancel',e=>{paintId=null});
+// Prevent context menu on long press
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+
+// ========== GAME LOOP ==========
+let paused=false,frameCount=0;
+function gameLoop(){
+  if(!paused){
+    for(let i=0;i<2;i++)updateSimulation();
+    // Joystick movement
+    if(Math.abs(joyDX)>0.2||Math.abs(joyDY)>0.2){
+      if(frameCount%2===0){if(Math.abs(joyDX)>Math.abs(joyDY))moveHuman(Math.sign(joyDX),0);else moveHuman(0,Math.sign(joyDY))}
+    }
+    // Jump button
+    if(jumpHeld&&frameCount%6===0)moveHuman(0,-1);
+    // Place button
+    if(placeHeld&&frameCount%15===0){if(selectedHuman>=0){const he=entities.find(ee=>ee.id===humanIds[selectedHuman]);if(he&&he.health>0){const px=he.x+he.dir,py=he.y;if(inBounds(px,py)&&g(px,py)===T.EMPTY&&entityMap[idx(px,py)]===0)s(px,py,currentMaterial)}}}
+  }
+  render();frameCount++;requestAnimationFrame(gameLoop);
+}
+
+// ========== INIT ==========
+resizeCanvas();buildMaterialRow();gameLoop();
+window.addEventListener('resize',()=>{resizeCanvas();imageData=ctx.createImageData(canvas.width,canvas.height);buildPalette()});
+window.addEventListener('orientationchange',()=>setTimeout(()=>{resizeCanvas();imageData=ctx.createImageData(canvas.width,canvas.height);buildPalette()},300));
+</script>
+</body>
+</html>
