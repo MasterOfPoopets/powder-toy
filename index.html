@@ -1,0 +1,2918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elemental Sandbox</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:'Segoe UI',Arial,sans-serif;color:#fff;user-select:none}
+#container{display:flex;width:100%;height:100%}
+#canvas{flex:1;display:block;cursor:crosshair;image-rendering:pixelated}
+#sidebar{width:165px;min-width:165px;background:#16213e;border-left:2px solid #0f3460;overflow-y:auto;overflow-x:hidden;padding:4px;display:flex;flex-direction:column;gap:2px}
+#sidebar::-webkit-scrollbar{width:4px}
+#sidebar::-webkit-scrollbar-thumb{background:#0f3460;border-radius:2px}
+.sb-category{font-size:10px;font-weight:bold;text-transform:uppercase;color:#8899aa;padding:6px 4px 2px;letter-spacing:1px;border-bottom:1px solid #0f3460;margin-bottom:2px}
+.sb-btn{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:4px;cursor:pointer;border:2px solid transparent;transition:all 0.1s;font-size:11px;color:#ccc;min-height:30px}
+.sb-btn:hover{background:#1a2744}
+.sb-btn.active{border-color:#e94560;background:#1a2744;color:#fff}
+.sb-btn .swatch{width:20px;height:20px;border-radius:3px;flex-shrink:0;border:1px solid rgba(255,255,255,0.15)}
+.sb-btn .label{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#brush-control{display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid #0f3460;margin-bottom:4px}
+#brush-control label{font-size:10px;color:#8899aa;white-space:nowrap}
+#brush-control input[type=range]{flex:1;accent-color:#e94560;height:4px}
+#info-bar{font-size:10px;color:#667788;padding:4px;text-align:center;border-top:1px solid #0f3460;margin-top:auto}
+#controls-hint{font-size:9px;color:#556677;padding:4px;text-align:center;line-height:1.4}
+</style>
+</head>
+<body>
+<div id="container">
+<canvas id="canvas"></canvas>
+<div id="sidebar"></div>
+</div>
+<script>
+// =====================================================
+// CONSTANTS
+// =====================================================
+const CELL = 6;
+const SIDEBAR_W = 165;
+const MAX_ENTITIES = 200;
+const MAX_HUMANS = 3;
+const MAX_ANIMALS = 50;
+
+const T = {
+  EMPTY:0, DIRT:1, WATER:2, LAVA:3, GRASS:4, STEAM:5, POISON:6, ACID:7,
+  SAPLING:8, WOOD:9, LEAVES:10, STONE:11, FIRE:12, ASH:13, MUD:14,
+  HUMAN:15, COW:16, CHICKEN:17, SHEEP:18, PARROT:19, INSECT:20, DOG:21, CAT:22, TURTLE:23, FISH:24, SHARK:25,
+  OBSIDIAN:26, MONKEY:27, MEAT:28, FRUIT:29, BREAD:30, CAKE:31, CANDY:32, NUTS:33, BANANA:34, LION:35, GORILLA:36, ZOMBIE:37,
+  ICE:38, PENGUIN:39, FOOTBALL:40
+};
+
+const MATERIAL_PROPS = {
+  [T.EMPTY]:  {name:'Empty',      color:'#000000', state:'empty', cat:'tools'},
+  [T.DIRT]:   {name:'Dirt',       color:'#8B6914', state:'powder', cat:'materials'},
+  [T.WATER]:  {name:'Water',      color:'#3366FF', state:'liquid', cat:'materials'},
+  [T.LAVA]:   {name:'Lava',       color:'#FF4400', state:'liquid', cat:'materials'},
+  [T.GRASS]:  {name:'Grass',      color:'#33AA33', state:'living', cat:'living'},
+  [T.STEAM]:  {name:'Steam',      color:'#DDDDDD', state:'gas', cat:'materials', lifespan:120},
+  [T.POISON]: {name:'Poison',     color:'#88FF00', state:'liquid', cat:'materials'},
+  [T.ACID]:   {name:'Acid',       color:'#CCFF00', state:'liquid', cat:'materials'},
+  [T.SAPLING]:{name:'Sapling',    color:'#228B22', state:'living', cat:'living'},
+  [T.WOOD]:   {name:'Wood',       color:'#8B5A2B', state:'solid', cat:'materials'},
+  [T.LEAVES]: {name:'Leaves',     color:'#44AA44', state:'solid', cat:'materials'},
+  [T.STONE]:  {name:'Stone',      color:'#888888', state:'solid', cat:'materials'},
+  [T.OBSIDIAN]:{name:'Obsidian',   color:'#5c3d99', state:'solid', cat:'materials'},
+  [T.FIRE]:   {name:'Fire',       color:'#FF8800', state:'gas', cat:'materials', lifespan:40},
+  [T.ASH]:    {name:'Ash',        color:'#666666', state:'powder', cat:'materials'},
+  [T.MUD]:    {name:'Mud',        color:'#6B5B2B', state:'liquid', cat:'materials'},
+  [T.HUMAN]:  {name:'Human',      color:'#FFCC99', state:'entity', cat:'living'},
+  [T.COW]:    {name:'Cow',        color:'#FFFFFF', state:'entity', cat:'animals'},
+  [T.CHICKEN]:{name:'Chicken',    color:'#FFDD44', state:'entity', cat:'animals'},
+  [T.SHEEP]:  {name:'Sheep',      color:'#DDDDDD', state:'entity', cat:'animals'},
+  [T.PARROT]: {name:'Parrot',     color:'#FF4444', state:'entity', cat:'animals'},
+  [T.INSECT]: {name:'Insect',     color:'#442200', state:'entity', cat:'animals'},
+  [T.DOG]:    {name:'Dog',        color:'#B8860B', state:'entity', cat:'animals'},
+  [T.CAT]:    {name:'Cat',        color:'#FF8800', state:'entity', cat:'animals'},
+  [T.TURTLE]: {name:'Turtle',     color:'#44AA44', state:'entity', cat:'animals'},
+  [T.FISH]:   {name:'Fish',       color:'#4488FF', state:'entity', cat:'animals'},
+  [T.SHARK]:  {name:'Shark',      color:'#444488', state:'entity', cat:'animals'},
+  [T.MONKEY]: {name:'Monkey',     color:'#8B5A2B', state:'entity', cat:'animals'},
+  [T.MEAT]:   {name:'Meat',       color:'#CC3333', state:'solid', cat:'food'},
+  [T.FRUIT]:  {name:'Fruit',      color:'#44DD44', state:'solid', cat:'food'},
+  [T.BREAD]:  {name:'Bread',      color:'#EEBB55', state:'solid', cat:'food'},
+  [T.CAKE]:   {name:'Cake',       color:'#FF88AA', state:'solid', cat:'food'},
+  [T.CANDY]:  {name:'Candy',      color:'#CC44FF', state:'solid', cat:'food'},
+  [T.NUTS]:   {name:'Nuts',       color:'#AA7733', state:'solid', cat:'food'},
+  [T.BANANA]: {name:'Banana',     color:'#FFEE44', state:'solid', cat:'food'},
+  [T.LION]:   {name:'Lion',       color:'#DAA520', state:'entity', cat:'animals'},
+  [T.GORILLA]:{name:'Gorilla',    color:'#444444', state:'entity', cat:'animals'},
+  [T.ZOMBIE]: {name:'Zombie',     color:'#5D8A5D', state:'entity', cat:'animals'},
+  [T.ICE]:    {name:'Ice',        color:'#88DDFF', state:'solid', cat:'materials'},
+  [T.PENGUIN]:{name:'Penguin',    color:'#222222', state:'entity', cat:'animals'},
+  [T.FOOTBALL]:{name:'Football',  color:'#FFFFFF', state:'entity', cat:'sports'}
+};
+
+const LIQUID_SPREAD = { [T.WATER]:4, [T.LAVA]:2, [T.POISON]:3, [T.ACID]:3, [T.MUD]:1 };
+
+// =====================================================
+// GRID
+// =====================================================
+let COLS, ROWS;
+let grid, moved, extra, entityMap;
+
+function initGrid(w,h){
+  COLS=w; ROWS=h;
+  const sz = COLS*ROWS;
+  grid = new Uint8Array(sz);
+  moved = new Uint8Array(sz);
+  extra = new Uint16Array(sz);
+  entityMap = new Uint8Array(sz);
+}
+
+function idx(x,y){ return y*COLS+x; }
+function g(x,y){ return grid[idx(x,y)]; }
+function s(x,y,v){ grid[idx(x,y)]=v; }
+function inBounds(x,y){ return x>=0 && x<COLS && y>=0 && y<ROWS; }
+function clearGrid(){ grid.fill(0); moved.fill(0); extra.fill(0); entityMap.fill(0); }
+
+// =====================================================
+// ENTITY SYSTEM
+// =====================================================
+let entities = [];
+let nextEntityId = 1;
+let selectedHuman = -1;
+let humanIds = [];
+
+function createEntity(type, x, y){
+  if(entities.length >= MAX_ENTITIES) return null;
+  if(type === T.HUMAN && humanIds.length >= MAX_HUMANS) return null;
+  const id = nextEntityId++;
+  const e = { id, type, x:Math.round(x), y:Math.round(y), dir:1, health:100, age:0, 
+    selected:false, targetId:-1, actionCd:0, vy:0, vx:0, bounces:0 };
+  entities.push(e);
+  if(type === T.HUMAN){
+    humanIds.push(id);
+    if(selectedHuman < 0){ selectedHuman = 0; e.selected = true; }
+  }
+  // Mark grid - don't overwrite material, just entity map
+  const p = idx(e.x, e.y);
+  if(inBounds(e.x, e.y)){
+    entityMap[p] = id;
+  }
+  return e;
+}
+
+function removeEntity(id){
+  const ei = entities.findIndex(e=>e.id===id);
+  if(ei<0) return;
+  const e = entities[ei];
+  if(e.type === T.HUMAN){
+    const hi = humanIds.indexOf(id);
+    if(hi>=0) humanIds.splice(hi,1);
+    if(e.selected){
+      selectedHuman = -1;
+      if(humanIds.length > 0){
+        selectedHuman = 0;
+        const h = entities.find(ee=>ee.id===humanIds[0]);
+        if(h) h.selected = true;
+      }
+    }
+  }
+  // Clear entity mapping from grid
+  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+    const cx=e.x+dx, cy=e.y+dy;
+    if(inBounds(cx,cy) && entityMap[idx(cx,cy)]===id){
+      entityMap[idx(cx,cy)]=0;
+    }
+  }
+  entities.splice(ei,1);
+}
+
+function getEntityAt(gx, gy){
+  const id = entityMap[idx(gx, gy)];
+  if(!id) return null;
+  return entities.find(e=>e.id===id);
+}
+
+// =====================================================
+// RENDERING
+// =====================================================
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let imageData, palette;
+
+function buildPalette(){
+  palette = new Uint32Array(41);
+  for(let i=0;i<41;i++){
+    if(MATERIAL_PROPS[i]){
+      const c = hexToRgba(MATERIAL_PROPS[i].color, 255);
+      palette[i] = (c[3]<<24)|(c[2]<<16)|(c[1]<<8)|c[0];
+    } else palette[i] = 0;
+  }
+}
+
+function hexToRgba(hex, a){
+  const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  return [r,g,b,a];
+}
+
+function resizeCanvas(){
+  const w = window.innerWidth - SIDEBAR_W;
+  const h = window.innerHeight;
+  const cols = Math.floor(w / CELL);
+  const rows = Math.floor(h / CELL);
+  canvas.width = cols * CELL;
+  canvas.height = rows * CELL;
+  initGrid(cols, rows);
+  imageData = ctx.createImageData(canvas.width, canvas.height);
+  buildPalette();
+  // Recreate entities? No, just clear and rebuild hints
+}
+
+// Draw food cells as recognizable food shapes (each cell is 6x6 pixels)
+function drawFoodIcon(type, px, py, h32, w){
+  const cellW = canvas.width;
+  const cellH = canvas.height;
+  function sp(dx, dy, color){
+    const x = px+dx, y = py+dy;
+    if(x<0 || x>=cellW || y<0 || y>=cellH) return;
+    h32[y * w + x] = color;
+  }
+  
+  // Colors in RGBA uint32 format
+  const white = 0xFFFFFFFF;
+  const brown = 0xFF2B5A8B;
+  const darkBrown = 0xFF1E3C5C;
+  const black = 0xFF000000;
+  
+  if(type === T.MEAT){
+    // 🥩 Realistic piece of raw meat/steak with marbling
+    const meatRed = 0xFF3344CC;     // rich red meat
+    const meatDark = 0xFF2233AA;    // darker red
+    const fat = 0xFFFFDDEE;         // white/yellowish fat
+    const seared = 0xFF443322;      // seared/burnt edge
+    
+    // Irregular meat shape with marbling
+    sp(0, 2, meatRed); sp(0, 3, meatRed); sp(0, 4, meatRed);
+    sp(1, 1, meatRed); sp(1, 2, meatRed); sp(1, 3, meatRed); sp(1, 4, meatRed); sp(1, 5, meatRed);
+    sp(2, 0, meatRed); sp(2, 1, meatRed); sp(2, 2, meatRed); sp(2, 3, meatRed); sp(2, 4, meatRed); sp(2, 5, meatRed);
+    sp(3, 0, meatRed); sp(3, 1, meatRed); sp(3, 2, meatRed); sp(3, 3, meatRed); sp(3, 4, meatRed); sp(3, 5, meatRed);
+    sp(4, 1, meatRed); sp(4, 2, meatRed); sp(4, 3, meatRed); sp(4, 4, meatRed); sp(4, 5, meatRed);
+    sp(5, 2, meatRed); sp(5, 3, meatRed); sp(5, 4, meatRed);
+    
+    // Darker seared edges
+    sp(0, 2, meatDark); sp(0, 3, seared); sp(0, 4, meatDark);
+    sp(1, 1, seared); sp(1, 5, seared);
+    sp(2, 0, seared); sp(2, 5, seared);
+    sp(3, 0, seared); sp(3, 5, seared);
+    sp(4, 1, seared); sp(4, 5, seared);
+    sp(5, 2, meatDark); sp(5, 3, seared); sp(5, 4, meatDark);
+    
+    // Fat marbling streaks through the meat
+    sp(1, 3, fat);
+    sp(2, 2, fat); sp(2, 4, fat);
+    sp(3, 1, fat); sp(3, 3, fat);
+    sp(4, 2, fat);
+    
+    // Grill marks
+    sp(1, 2, seared); sp(4, 3, seared);
+    return;
+  }
+  if(type === T.FRUIT){
+    // 🍎 Apple: green/red circle with stem
+    const appleColor = 0xFF44DD44;
+    // Stem
+    sp(3, 0, brown);
+    sp(2, 1, brown); sp(3, 1, brown);
+    // Apple body
+    sp(1, 2, appleColor); sp(2, 2, appleColor); sp(3, 2, appleColor); sp(4, 2, appleColor);
+    sp(0, 3, appleColor); sp(1, 3, appleColor); sp(2, 3, appleColor); sp(3, 3, appleColor); sp(4, 3, appleColor); sp(5, 3, appleColor);
+    sp(0, 4, appleColor); sp(1, 4, appleColor); sp(2, 4, appleColor); sp(3, 4, appleColor); sp(4, 4, appleColor); sp(5, 4, appleColor);
+    sp(1, 5, appleColor); sp(2, 5, appleColor); sp(3, 5, appleColor); sp(4, 5, appleColor);
+    // Highlight
+    sp(1, 3, 0xFF66FF66);
+    return;
+  }
+  if(type === T.BREAD){
+    // 🍞 Bread loaf: golden with darker crust
+    // Crust top
+    sp(0, 0, 0xFFAA6622); sp(1, 0, 0xFFAA6622); sp(2, 0, 0xFFAA6622); sp(3, 0, 0xFFAA6622); sp(4, 0, 0xFFAA6622); sp(5, 0, 0xFFAA6622);
+    // Bread body
+    sp(0, 1, 0xFFEEBB55); sp(1, 1, 0xFFEEBB55); sp(2, 1, 0xFFEEBB55); sp(3, 1, 0xFFEEBB55); sp(4, 1, 0xFFEEBB55); sp(5, 1, 0xFFEEBB55);
+    sp(0, 2, 0xFFEEBB55); sp(1, 2, 0xFFEEBB55); sp(2, 2, 0xFFEEBB55); sp(3, 2, 0xFFEEBB55); sp(4, 2, 0xFFEEBB55); sp(5, 2, 0xFFEEBB55);
+    sp(0, 3, 0xFFEEBB55); sp(1, 3, 0xFFEEBB55); sp(2, 3, 0xFFEEBB55); sp(3, 3, 0xFFEEBB55); sp(4, 3, 0xFFEEBB55); sp(5, 3, 0xFFEEBB55);
+    sp(0, 4, 0xFFDDAA44); sp(1, 4, 0xFFDDAA44); sp(2, 4, 0xFFDDAA44); sp(3, 4, 0xFFDDAA44); sp(4, 4, 0xFFDDAA44); sp(5, 4, 0xFFDDAA44);
+    sp(0, 5, 0xFFCC8833); sp(1, 5, 0xFFCC8833); sp(2, 5, 0xFFCC8833); sp(3, 5, 0xFFCC8833); sp(4, 5, 0xFFCC8833); sp(5, 5, 0xFFCC8833);
+    return;
+  }
+  if(type === T.CAKE){
+    // 🎂 Layered cake: pink with white frosting
+    // Frosting top
+    sp(0, 0, white); sp(1, 0, white); sp(2, 0, white); sp(3, 0, white); sp(4, 0, white); sp(5, 0, white);
+    // Top layer
+    sp(0, 1, 0xFFEE88AA); sp(1, 1, 0xFFEE88AA); sp(2, 1, 0xFFEE88AA); sp(3, 1, 0xFFEE88AA); sp(4, 1, 0xFFEE88AA); sp(5, 1, 0xFFEE88AA);
+    // Frosting middle
+    sp(0, 2, white); sp(1, 2, 0xFFFFAAAA); sp(2, 2, 0xFFFFAAAA); sp(3, 2, 0xFFFFAAAA); sp(4, 2, 0xFFFFAAAA); sp(5, 2, white);
+    // Bottom layer
+    sp(0, 3, 0xFFEE88AA); sp(1, 3, 0xFFEE88AA); sp(2, 3, 0xFFEE88AA); sp(3, 3, 0xFFEE88AA); sp(4, 3, 0xFFEE88AA); sp(5, 3, 0xFFEE88AA);
+    sp(0, 4, 0xFFDD6699); sp(1, 4, 0xFFDD6699); sp(2, 4, 0xFFDD6699); sp(3, 4, 0xFFDD6699); sp(4, 4, 0xFFDD6699); sp(5, 4, 0xFFDD6699);
+    sp(0, 5, 0xFFDD6699); sp(1, 5, 0xFFDD6699); sp(2, 5, 0xFFDD6699); sp(3, 5, 0xFFDD6699); sp(4, 5, 0xFFDD6699); sp(5, 5, 0xFFDD6699);
+    // Candle on top
+    sp(2, 0, 0xFFFF4444); sp(3, 0, 0xFFFF4444);
+    return;
+  }
+  if(type === T.CANDY){
+    // 🍬 Swirl candy: purple spiral
+    // Background
+    for(let dy=0;dy<6;dy++) for(let dx=0;dx<6;dx++) sp(dx, dy, 0xFFCC44FF);
+    // Swirl pattern (lighter)
+    sp(1, 1, 0xFFEE88FF); sp(2, 1, 0xFFEE88FF);
+    sp(1, 2, 0xFFEE88FF); sp(2, 2, 0xFFEE88FF); sp(3, 2, 0xFFEE88FF);
+    sp(2, 3, 0xFFEE88FF); sp(3, 3, 0xFFEE88FF); sp(4, 3, 0xFFEE88FF);
+    sp(3, 4, 0xFFEE88FF); sp(4, 4, 0xFFEE88FF);
+    // Wrapper ends
+    sp(0, 0, white); sp(5, 0, white);
+    sp(0, 5, white); sp(5, 5, white);
+    return;
+  }
+  if(type === T.NUTS){
+    // 🥜 Nuts: two small brown ovals
+    // Left nut
+    sp(0, 3, darkBrown); sp(1, 2, darkBrown); sp(1, 3, darkBrown); sp(1, 4, darkBrown); sp(2, 3, darkBrown);
+    sp(0, 4, 0xFFAA7733); sp(2, 2, 0xFFAA7733);
+    // Right nut
+    sp(3, 3, darkBrown); sp(4, 2, darkBrown); sp(4, 3, darkBrown); sp(4, 4, darkBrown); sp(5, 3, darkBrown);
+    sp(3, 2, 0xFFAA7733); sp(5, 2, 0xFFAA7733);
+    return;
+  }
+  if(type === T.BANANA){
+    // 🍌 Banana: yellow crescent shape
+    sp(0, 3, 0xFFEEEE44); sp(0, 4, 0xFFEEEE44);
+    sp(1, 2, 0xFFEEEE44); sp(1, 3, 0xFFEEEE44); sp(1, 4, 0xFFEEEE44); sp(1, 5, 0xFFEEEE44);
+    sp(2, 1, 0xFFEEEE44); sp(2, 2, 0xFFEEEE44); sp(2, 3, 0xFFEEEE44); sp(2, 4, 0xFFEEEE44); sp(2, 5, 0xFFEEEE44);
+    sp(3, 1, 0xFFEEEE44); sp(3, 2, 0xFFEEEE44); sp(3, 3, 0xFFEEEE44); sp(3, 4, 0xFFEEEE44);
+    sp(4, 2, 0xFFDDDD33); sp(4, 3, 0xFFDDDD33);
+    sp(5, 3, 0xFFCCCC22);
+    // Brown tip
+    sp(0, 5, darkBrown);
+    return;
+  }
+}
+
+function render(){
+  const data = imageData.data;
+  const w = canvas.width;
+  const h32 = new Uint32Array(data.buffer);
+  
+  // Fast clear using palette[EMPTY]
+  const emptyColor = palette[T.EMPTY];
+  h32.fill(emptyColor);
+  
+  // Draw grid materials (ice handled separately below)
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      const t = grid[idx(x,y)];
+      if(t === T.EMPTY || t === T.ICE) continue;
+      const color = palette[t] || emptyColor;
+      const px = x * CELL, py = y * CELL;
+      for(let dy=0;dy<CELL;dy++){
+        const row = py + dy;
+        for(let dx=0;dx<CELL;dx++){
+          h32[row * w + px + dx] = color;
+        }
+      }
+    }
+  }
+  
+  // Draw ice with frosty white streaks
+  const iceColor = palette[T.ICE];
+  const frostColor = 0xFFCCEEFF;
+  if(iceColor){
+    for(let y=0;y<ROWS;y++){
+      for(let x=0;x<COLS;x++){
+        if(grid[idx(x,y)] !== T.ICE) continue;
+        const px = x * CELL, py = y * CELL;
+        for(let dy=0;dy<CELL;dy++){
+          const row = py + dy;
+          for(let dx=0;dx<CELL;dx++){
+            h32[row * w + px + dx] = iceColor;
+          }
+        }
+        // Frost streaks
+        const seed = x * 31 + y * 17;
+        const i1 = (seed % 3) + 1, j1 = ((seed * 7) % 4) + 1;
+        const i2 = ((seed * 5) % 5) + 1, j2 = ((seed * 3) % 5) + 1;
+        const i3 = ((seed * 11) % 5) + 1, j3 = ((seed * 13) % 5) + 1;
+        const off1 = (py+j1)*w + px+i1;
+        const off2 = (py+j2)*w + px+i2;
+        const off3 = (py+j3)*w + px+i3;
+        if(off1 < h32.length) h32[off1] = frostColor;
+        if(off2 < h32.length) h32[off2] = frostColor;
+        if(off3 < h32.length) h32[off3] = 0xFFDDF0FF;
+      }
+    }
+  }
+  
+  // Draw food materials as recognizable shapes instead of solid blocks
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      const t = grid[idx(x,y)];
+      if(t < T.MEAT || t > T.BANANA) continue;
+      const px = x * CELL, py = y * CELL;
+      drawFoodIcon(t, px, py, h32, w);
+    }
+  }
+  
+  // Draw entities on top
+  for(const e of entities){
+    drawEntity(e, h32, w);
+  }
+  
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function drawEntity(e, h32, w){
+  const px = e.x * CELL, py = e.y * CELL;
+  const c = palette[e.type] || palette[T.EMPTY];
+  
+  if(e.type === T.HUMAN){
+    // Melting effect based on health
+    const healthPct = Math.max(0, e.health) / 100;
+    const melt = 1 - healthPct; // 0 = healthy, 1 = fully melted
+    const skipChance = melt * melt * 0.9; // pixel skip chance increases as health drops
+    const shrink = Math.max(0, 1 - melt * 0.6); // shrink down to 40% size
+    
+    function shouldDraw(){ return Math.random() > skipChance; }
+    
+    const cx = px + 6;                 // center X
+    const cy = py;                     // top Y
+    const dir = e.dir;
+    
+    // Colors shift toward burnt brown as health drops
+    const blend = (c1, c2, t)=>{
+      const b1=(c1>>>24)&0xFF, g1=(c1>>>16)&0xFF, r1=c1&0xFF;
+      const b2=(c2>>>24)&0xFF, g2=(c2>>>16)&0xFF, r2=c2&0xFF;
+      return ((b1+(b2-b1)*t)<<24)|((g1+(g2-g1)*t)<<16)|((r1+(r2-r1)*t)<<8)|0xFF;
+    };
+    const burnt = 0xFF444422; // dark burnt color (RGBA 34,68,68)
+    
+    const skinColor = blend(0xFFAADDFF, burnt, melt);
+    const bodyColor = blend(0xFF88CCDD, burnt, melt);
+    const shirtColor = blend(0xFFFFFFFF, burnt, melt);
+    const outlineColor = blend(0xFF333333, burnt, melt);
+    const pantsColor = blend(0xFF885544, burnt, melt);
+    
+    const headR = Math.round(6 * shrink);
+    const bodyR = Math.round(3 * shrink);
+    const pantsR = Math.round(5 * shrink);
+    const legR = Math.round(6 * shrink);
+    const armLen = Math.round(16 * shrink);
+    const bodyH = Math.round(26 * shrink);
+    const pantsH = Math.round(5 * shrink);
+    const legH = Math.round(13 * shrink);
+    const headH = Math.round(11 * shrink);
+    
+    function setP(x, y, color){
+      if(x<0 || x>=canvas.width || y<0 || y>=canvas.height) return;
+      if(!shouldDraw()) return;
+      const i = y * w + x;
+      if(i < h32.length) h32[i] = color;
+    }
+    function drawLine(x1,y1,x2,y2,color){
+      const dx=Math.abs(x2-x1), dy=Math.abs(y2-y1);
+      const sx=x1<x2?1:-1, sy=y1<y2?1:-1;
+      let err=dx-dy;
+      let x=x1, y=y1;
+      while(true){
+        setP(x,y,color);
+        if(x===x2 && y===y2) break;
+        const e2=2*err;
+        if(e2>-dy){ err-=dy; x+=sx; }
+        if(e2<dx){ err+=dx; y+=sy; }
+      }
+    }
+    function fillRect(x1,y1,x2,y2,color){
+      for(let y=y1;y<=y2;y++) for(let x=x1;x<=x2;x++) setP(x,y,color);
+    }
+    
+    // Head
+    fillRect(cx-headR, cy-headH, cx+headR, cy, skinColor);
+    if(dir > 0){
+      setP(cx+headR-1, cy-headH+3, outlineColor);
+      setP(cx+headR, cy-headH+6, outlineColor);
+    } else {
+      setP(cx-headR+1, cy-headH+3, outlineColor);
+      setP(cx-headR, cy-headH+6, outlineColor);
+    }
+    
+    // T-shirt
+    fillRect(cx-bodyR, cy+1, cx+bodyR, cy+bodyH, shirtColor);
+    
+    // Arms
+    drawLine(cx-armLen, cy+6, cx-bodyR, cy+bodyR+5, bodyColor);
+    drawLine(cx+bodyR, cy+bodyR+5, cx+armLen, cy+6, bodyColor);
+    
+    // Pants
+    fillRect(cx-pantsR, cy+bodyH, cx+pantsR, cy+bodyH+pantsH, pantsColor);
+    
+    // Legs
+    fillRect(cx-legR, cy+bodyH+pantsH, cx-1, cy+bodyH+pantsH+legH, pantsColor);
+    fillRect(cx+1, cy+bodyH+pantsH, cx+legR, cy+bodyH+pantsH+legH, pantsColor);
+    
+    // Shoes
+    fillRect(cx-legR, cy+bodyH+pantsH+legH, cx-1, cy+bodyH+pantsH+legH+3, outlineColor);
+    fillRect(cx+1, cy+bodyH+pantsH+legH, cx+legR, cy+bodyH+pantsH+legH+3, outlineColor);
+    
+    // Melt drips below the feet when damaged
+    if(melt > 0.3){
+      const dripColor = blend(0xFF885544, burnt, melt);
+      for(let i=0;i<Math.floor(melt*8);i++){
+        const dx = (Math.random()-0.5)*12;
+        const dy = bodyH+pantsH+legH+4 + Math.floor(Math.random()*melt*8);
+        setP(cx+Math.round(dx), cy+dy, dripColor);
+      }
+    }
+    
+    // Selected highlight
+    if(e.selected && healthPct > 0.2){
+      const hl = 0xFF4444FF;
+      const bx=cx-armLen-1, by=cy-headH-1, bx2=cx+armLen+1, by2=cy+bodyH+pantsH+legH+4;
+      for(let dx=bx;dx<=bx2;dx++){
+        setP(dx, by, hl);
+        setP(dx, by2, hl);
+      }
+      for(let dy=by;dy<=by2;dy++){
+        setP(bx, dy, hl);
+        setP(bx2, dy, hl);
+      }
+    }
+    return;
+  }
+  
+  // Fish rendering (bigger, fish-shaped)
+  if(e.type === T.FISH || e.type === T.SHARK){
+    const isShark = e.type === T.SHARK;
+    const cx = px + (isShark ? 6 : 5);
+    const cy = py + 2;
+    const bodyColor = isShark ? 0xFFB4643C : 0xFF3CB4FF;
+    const darkColor = isShark ? 0xFF783C1E : 0xFF1E78C8;
+    const eyeColor = 0xFF000000;
+    
+    function setP(x, y, color){
+      if(x<0 || x>=canvas.width || y<0 || y>=canvas.height) return;
+      const i = y * w + x;
+      if(i < h32.length) h32[i] = color;
+    }
+    function fillRect(x1,y1,x2,y2,color){
+      for(let y=y1;y<=y2;y++) for(let x=x1;x<=x2;x++) setP(x,y,color);
+    }
+    
+    const facingRight = e.dir >= 0;
+    
+    if(isShark){
+      if(facingRight){
+        fillRect(cx-5, cy-4, cx+7, cy+5, bodyColor);
+        fillRect(cx-8, cy-2, cx-6, cy+3, bodyColor);
+        fillRect(cx-10, cy, cx-8, cy+2, bodyColor);
+        fillRect(cx, cy-7, cx+4, cy-5, darkColor);
+        fillRect(cx+7, cy-3, cx+10, cy+4, bodyColor);
+        fillRect(cx+10, cy, cx+11, cy+2, bodyColor);
+        setP(cx+7, cy-2, eyeColor);
+        fillRect(cx-4, cy+3, cx+5, cy+4, darkColor);
+        fillRect(cx+7, cy+3, cx+10, cy+4, 0xFFFFFFFF);
+      } else {
+        fillRect(cx-7, cy-4, cx+5, cy+5, bodyColor);
+        fillRect(cx+5, cy-2, cx+7, cy+3, bodyColor);
+        fillRect(cx+7, cy, cx+9, cy+2, bodyColor);
+        fillRect(cx-4, cy-7, cx, cy-5, darkColor);
+        fillRect(cx-10, cy-3, cx-7, cy+4, bodyColor);
+        fillRect(cx-11, cy, cx-10, cy+2, bodyColor);
+        setP(cx-7, cy-2, eyeColor);
+        fillRect(cx-5, cy+3, cx+4, cy+4, darkColor);
+        fillRect(cx-10, cy+3, cx-7, cy+4, 0xFFFFFFFF);
+      }
+    } else {
+      if(facingRight){
+        fillRect(cx-5, cy-4, cx+5, cy+4, bodyColor);
+        fillRect(cx-9, cy-2, cx-6, cy+3, bodyColor);
+        fillRect(cx-10, cy, cx-9, cy+2, bodyColor);
+        fillRect(cx+5, cy-2, cx+8, cy+3, bodyColor);
+        setP(cx+5, cy-2, eyeColor);
+        fillRect(cx-1, cy-5, cx+1, cy-4, darkColor);
+      } else {
+        fillRect(cx-5, cy-4, cx+5, cy+4, bodyColor);
+        fillRect(cx+5, cy-2, cx+8, cy+3, bodyColor);
+        fillRect(cx+8, cy, cx+9, cy+2, bodyColor);
+        fillRect(cx-8, cy-2, cx-5, cy+3, bodyColor);
+        setP(cx-5, cy-2, eyeColor);
+        fillRect(cx-1, cy-5, cx+1, cy-4, darkColor);
+      }
+    }
+    return;
+  }
+  
+  // ===== ANIMAL RENDERING (bigger, ~1.5x scale) =====
+  // Colors use uint32 format: (A<<24)|(B<<16)|(G<<8)|R
+  const setP = (x,y,col)=>{ if(x>=0&&x<canvas.width&&y>=0&&y<canvas.height){ const i=y*w+x; if(i<h32.length) h32[i]=col; }};
+  const fillR = (x1,y1,x2,y2,col)=>{ for(let y=y1;y<=y2;y++) for(let x=x1;x<=x2;x++) setP(x,y,col); };
+  
+  if(e.type === T.COW){
+    fillR(px, py, px+19, py+11, 0xFFFFFFFF);         // white body
+    fillR(px+19, py-2, px+25, py+5, 0xFFFFFFFF);    // head
+    setP(px+20, py-1, 0xFF000000);                   // eye
+    setP(px+23, py+2, 0xFF000000);                   // nostril
+    fillR(px, py+12, px+3, py+17, 0xFF333333);       // legs
+    fillR(px+7, py+12, px+10, py+17, 0xFF333333);
+    fillR(px+14, py+12, px+17, py+17, 0xFF333333);
+    fillR(px+21, py+12, px+24, py+17, 0xFF333333);
+    setP(px+5, py+3, 0xFF444444);                    // spots
+    setP(px+11, py+2, 0xFF444444);
+    setP(px+15, py+7, 0xFF444444);
+    setP(px+9, py+8, 0xFF444444);
+    return;
+  }
+  if(e.type === T.CHICKEN){
+    fillR(px+1, py+1, px+15, py+10, 0xFF44DDFF);    // yellow body
+    fillR(px+11, py-5, px+19, py, 0xFF44DDFF);      // head
+    setP(px+14, py-3, 0xFF000000);                   // eye
+    setP(px+18, py-2, 0xFF0088FF);                   // beak
+    fillR(px+5, py+3, px+10, py+7, 0xFF33AAFF);     // wing
+    setP(px+3, py+5, 0xFF0088FF);
+    setP(px+12, py-6, 0xFFFF4444);                   // comb
+    setP(px+13, py-6, 0xFFFF4444);
+    setP(px+15, py-6, 0xFFFF4444);
+    setP(px+3, py+11, 0xFF0088FF);                   // legs
+    setP(px+11, py+11, 0xFF0088FF);
+    return;
+  }
+  if(e.type === T.SHEEP){
+    fillR(px, py, px+18, py+11, 0xFFDDDDDD);         // fluffy body
+    fillR(px-2, py+1, px, py+7, 0xFFDDDDDD);         // fluff
+    fillR(px+18, py+1, px+21, py+7, 0xFFDDDDDD);
+    setP(px-2, py-1, 0xFFDDDDDD);
+    setP(px+18, py-2, 0xFFDDDDDD);
+    setP(px+19, py-2, 0xFFDDDDDD);
+    setP(px+20, py-1, 0xFFDDDDDD);
+    fillR(px+18, py-2, px+23, py+5, 0xFFAAAAAA);    // face
+    setP(px+19, py-1, 0xFF222222);                   // eye
+    setP(px+21, py+2, 0xFF000000);                   // nose
+    fillR(px+1, py+12, px+5, py+17, 0xFF555555);     // legs
+    fillR(px+8, py+12, px+12, py+17, 0xFF555555);
+    fillR(px+15, py+12, px+19, py+17, 0xFF555555);
+    return;
+  }
+  if(e.type === T.PARROT){
+    fillR(px+1, py+1, px+15, py+10, 0xFF4444FF);    // red body
+    fillR(px+11, py-5, px+19, py, 0xFF4444FF);      // head
+    setP(px+14, py-3, 0xFF000000);                   // eye
+    setP(px+18, py-2, 0xFF00AAFF);                   // beak
+    fillR(px+5, py+3, px+10, py+8, 0xFFFF8844);     // blue wing
+    fillR(px+2, py+8, px+5, py+10, 0xFF44FF44);     // green wing
+    setP(px+14, py+11, 0xFF00AAFF);                  // yellow tail
+    setP(px+16, py+10, 0xFF00AAFF);
+    setP(px+16, py+11, 0xFF00AAFF);
+    setP(px+17, py+10, 0xFF00AAFF);
+    setP(px+17, py+11, 0xFF00AAFF);
+    setP(px+18, py+10, 0xFF00AAFF);
+    setP(px+18, py+11, 0xFF00AAFF);
+    setP(px+5, py+11, 0xFF0088FF);                   // legs
+    setP(px+11, py+11, 0xFF0088FF);
+    return;
+  }
+  if(e.type === T.INSECT){
+    fillR(px+4, py+3, px+11, py+8, 0xFF002244);     // body
+    setP(px+7, py+1, 0xFF002244);                    // head
+    setP(px+5, py, 0xFF002244);                      // antennae
+    setP(px+8, py, 0xFF002244);
+    setP(px+2, py+4, 0xFF002244);                    // legs
+    setP(px+13, py+4, 0xFF002244);
+    setP(px+1, py+7, 0xFF002244);
+    setP(px+14, py+7, 0xFF002244);
+    return;
+  }
+  if(e.type === T.DOG){
+    fillR(px, py, px+19, py+10, 0xFF0B86B8);        // golden body
+    fillR(px+19, py-4, px+25, py+4, 0xFF0B86B8);    // head
+    setP(px+19, py-4, 0xFF08658B);                   // dark ear
+    setP(px+22, py-1, 0xFF000000);                   // eye
+    setP(px+24, py+2, 0xFF0B86B8);                  // snout
+    fillR(px, py+11, px+4, py+16, 0xFF08658B);       // legs
+    fillR(px+8, py+11, px+12, py+16, 0xFF08658B);
+    fillR(px+15, py+11, px+19, py+16, 0xFF08658B);
+    fillR(px+22, py+11, px+25, py+16, 0xFF08658B);
+    setP(px+18, py-6, 0xFF0B86B8);                   // tail
+    setP(px+20, py-8, 0xFF0B86B8);
+    setP(px+22, py-7, 0xFF0B86B8);
+    setP(px+23, py-6, 0xFF0B86B8);
+    return;
+  }
+  if(e.type === T.CAT){
+    fillR(px+1, py, px+19, py+10, 0xFF0088FF);       // orange body
+    fillR(px+19, py-4, px+25, py+4, 0xFF0088FF);    // head
+    setP(px+20, py-6, 0xFF0088FF);                   // ear
+    setP(px+25, py-6, 0xFF0044FF);                   // ear inner
+    setP(px+19, py-6, 0xFF0044FF);
+    setP(px+22, py-1, 0xFF000000);                   // eye
+    setP(px+24, py+1, 0xFF0066FF);                   // nose
+    setP(px+19, py+3, 0xFF000000);                   // whisker
+    setP(px+1, py-3, 0xFF0088FF);                    // tail
+    setP(px, py-5, 0xFF0088FF);
+    setP(px-2, py-5, 0xFF0088FF);
+    setP(px-3, py-4, 0xFF0088FF);
+    setP(px-4, py-3, 0xFF0088FF);
+    setP(px-4, py-1, 0xFF0088FF);
+    fillR(px+1, py+11, px+5, py+16, 0xFF0066CC);    // legs
+    fillR(px+7, py+11, px+11, py+16, 0xFF0066CC);
+    fillR(px+14, py+11, px+18, py+16, 0xFF0066CC);
+    fillR(px+22, py+11, px+26, py+16, 0xFF0066CC);
+    return;
+  }
+  if(e.type === T.TURTLE){
+    fillR(px-1, py+2, px+17, py+10, 0xFF44AA44);    // green shell
+    fillR(px+2, py, px+15, py+1, 0xFF44AA44);
+    fillR(px+5, py-2, px+11, py-1, 0xFF44AA44);
+    fillR(px+4, py+4, px+13, py+8, 0xFF338833);     // shell pattern
+    setP(px+7, py+4, 0xFF44AA44);
+    setP(px+11, py+5, 0xFF44AA44);
+    setP(px+12, py+7, 0xFF44AA44);
+    setP(px-5, py+4, 0xFF44AA44);                    // head
+    setP(px-5, py+5, 0xFF44AA44);
+    setP(px-5, py+6, 0xFF44AA44);
+    setP(px-4, py+4, 0xFF44AA44);
+    setP(px-4, py+5, 0xFF44AA44);
+    setP(px-3, py+4, 0xFF44AA44);
+    setP(px-6, py+5, 0xFF000000);                    // eye
+    setP(px-6, py+6, 0xFF000000);
+    setP(px+3, py+11, 0xFF44AA44);                   // legs
+    setP(px+5, py+11, 0xFF44AA44);
+    setP(px+12, py+11, 0xFF44AA44);
+    setP(px+14, py+11, 0xFF44AA44);
+    return;
+  }
+  if(e.type === T.MONKEY){
+    // Big monkey standing on 2 legs - bipedal upright posture
+    const brown = 0xFF2B5A8B;
+    const lightBrown = 0xFF6B9AC4;
+    const darkBrown = 0xFF1E3C5C;
+    const faceColor = 0xFFA0785C;
+    const eyeColor = 0xFF000000;
+    
+    // LEGS (2 legs at bottom - bipedal stance)
+    fillR(px+4, py+12, px+8, py+19, darkBrown);   // left leg
+    fillR(px+13, py+12, px+17, py+19, darkBrown);  // right leg
+    
+    // Feet
+    fillR(px+3, py+18, px+9, py+19, brown);
+    fillR(px+12, py+18, px+18, py+19, brown);
+    
+    // BODY - upright torso
+    fillR(px+2, py+2, px+19, py+12, brown);
+    // Lighter belly
+    fillR(px+6, py+5, px+15, py+10, lightBrown);
+    
+    // HEAD - centered on top of body (standing upright)
+    fillR(px+4, py-7, px+17, py+3, faceColor);
+    fillR(px+3, py-5, px+4, py+1, faceColor);
+    fillR(px+17, py-5, px+18, py+1, faceColor);
+    
+    // EYES
+    setP(px+7, py-4, 0xFFFFFFFF);   // eye white left
+    setP(px+13, py-4, 0xFFFFFFFF);   // eye white right
+    setP(px+8, py-4, eyeColor);      // pupil left
+    setP(px+14, py-4, eyeColor);     // pupil right
+    
+    // NOSE
+    setP(px+10, py-1, 0xFF664422);
+    setP(px+11, py-1, 0xFF664422);
+    
+    // MOUTH
+    setP(px+8, py+1, 0xFF442211);
+    setP(px+9, py+1, 0xFF442211);
+    setP(px+10, py+1, 0xFF442211);
+    setP(px+11, py+1, 0xFF442211);
+    setP(px+12, py+1, 0xFF442211);
+    
+    // BIG ROUND EARS on sides of head
+    setP(px+1, py-5, brown);
+    setP(px+2, py-6, brown);
+    setP(px+2, py-5, brown);
+    setP(px+2, py-4, brown);
+    setP(px+2, py-3, brown);
+    // Inner ear left
+    setP(px+3, py-5, faceColor);
+    setP(px+3, py-4, faceColor);
+    
+    setP(px+19, py-5, brown);
+    setP(px+19, py-6, brown);
+    setP(px+19, py-5, brown);
+    setP(px+19, py-4, brown);
+    setP(px+19, py-3, brown);
+    // Inner ear right
+    setP(px+18, py-5, faceColor);
+    setP(px+18, py-4, faceColor);
+    
+    // ARMS hanging at sides (monkey-like, slightly bent)
+    fillR(px-5, py+3, px+1, py+7, brown);      // left upper arm
+    fillR(px-7, py+7, px-1, py+9, brown);       // left forearm
+    setP(px-7, py+9, darkBrown);                // left hand
+    setP(px-8, py+10, darkBrown);
+    setP(px-6, py+10, darkBrown);
+    
+    fillR(px+20, py+3, px+26, py+7, brown);     // right upper arm
+    fillR(px+22, py+7, px+28, py+9, brown);      // right forearm
+    setP(px+28, py+9, darkBrown);                // right hand
+    setP(px+27, py+10, darkBrown);
+    setP(px+29, py+10, darkBrown);
+    
+    // CURLY TAIL coming from lower back
+    setP(px+18, py+10, brown);
+    setP(px+20, py+9, brown);
+    setP(px+21, py+8, brown);
+    setP(px+22, py+7, brown);
+    setP(px+22, py+6, brown);
+    setP(px+21, py+5, brown);
+    setP(px+20, py+4, brown);
+    setP(px+19, py+3, brown);
+    
+    // Selected highlight
+    if(e.selected){
+      const hl = 0xFF4444FF;
+      const bx=px-9, by=py-8, bx2=px+30, by2=py+20;
+      for(let dx=bx;dx<=bx2;dx++){
+        setP(dx, by, hl);
+        setP(dx, by2, hl);
+      }
+      for(let dy=by;dy<=by2;dy++){
+        setP(bx, dy, hl);
+        setP(bx2, dy, hl);
+      }
+    }
+    return;
+  }
+  if(e.type === T.LION){
+    // 🦁 ABSOLUTELY ENORMOUS LION - KING OF THE JUNGLE!
+    const gold = 0xFF20A5DA;
+    const mane = 0xFF2B5A8B;
+    const dark = 0xFF1E3C5C;
+    const eyeColor = 0xFF000000;
+    
+    // ===== COLOSSAL BODY =====
+    fillR(px, py+2, px+45, py+22, gold);
+    // Lighter belly
+    fillR(px+10, py+8, px+35, py+18, 0xFF40BEE0);
+    
+    // ===== MASSIVE MANE (spans far around head!) =====
+    fillR(px+34, py-18, px+58, py+1, mane);
+    fillR(px+31, py-14, px+34, py-2, mane);
+    fillR(px+58, py-14, px+61, py-2, mane);
+    fillR(px+37, py-21, px+55, py-18, mane);
+    fillR(px+35, py-20, px+37, py-18, mane);
+    fillR(px+55, py-20, px+57, py-18, mane);
+    // Extra mane fluff all around
+    for(let i=-1;i<=3;i++){
+      setP(px+28+i, py-10-i, mane); setP(px+28+i, py-9-i, mane);
+      setP(px+60+i, py-10-i, mane); setP(px+60+i, py-9-i, mane);
+    }
+    setP(px+30, py-13, mane); setP(px+29, py-12, mane);
+    setP(px+59, py-13, mane); setP(px+60, py-12, mane);
+    setP(px+28, py-7, mane); setP(px+27, py-6, mane);
+    setP(px+27, py-4, mane); setP(px+26, py-5, mane);
+    setP(px+61, py-7, mane); setP(px+62, py-6, mane);
+    setP(px+63, py-5, mane); setP(px+62, py-4, mane);
+    setP(px+32, py-17, mane); setP(px+56, py-17, mane);
+    
+    // ===== BIG HEAD =====
+    fillR(px+36, py-14, px+56, py+3, gold);
+    fillR(px+34, py-10, px+36, py+1, gold);
+    fillR(px+56, py-10, px+58, py+1, gold);
+    
+    // ===== FIERCE EYES =====
+    fillR(px+40, py-9, px+44, py-7, 0xFFFFFFFF);  // eye white left
+    fillR(px+49, py-9, px+53, py-7, 0xFFFFFFFF);  // eye white right
+    setP(px+41, py-9, eyeColor); setP(px+42, py-9, eyeColor);  // pupils
+    setP(px+50, py-9, eyeColor); setP(px+51, py-9, eyeColor);
+    // Angry eyebrows
+    fillR(px+39, py-11, px+44, py-10, dark);
+    fillR(px+49, py-11, px+54, py-10, dark);
+    
+    // ===== BIG NOSE =====
+    fillR(px+44, py-5, px+49, py-3, 0xFF886644);
+    // Nostrils
+    setP(px+45, py-4, dark); setP(px+48, py-4, dark);
+    
+    // ===== ROARING MOUTH =====
+    fillR(px+41, py, px+52, py+3, 0xFF331100);
+    setP(px+40, py+1, 0xFF331100); setP(px+53, py+1, 0xFF331100);
+    // GIANT FANGS
+    setP(px+42, py+1, 0xFFFFFFFF); setP(px+42, py+2, 0xFFFFFFFF);
+    setP(px+51, py+1, 0xFFFFFFFF); setP(px+51, py+2, 0xFFFFFFFF);
+    setP(px+44, py+1, 0xFFFFFFFF); // smaller fang
+    setP(px+49, py+1, 0xFFFFFFFF);
+    // Tongue
+    setP(px+46, py+2, 0xFFFF6666); setP(px+47, py+2, 0xFFFF6666);
+    
+    // ===== EARS =====
+    setP(px+35, py-16, gold); setP(px+34, py-15, gold);
+    setP(px+57, py-16, gold); setP(px+58, py-15, gold);
+    setP(px+35, py-17, mane); setP(px+57, py-17, mane);
+    
+    // ===== FOUR HUGE LEGS =====
+    fillR(px+2, py+23, px+10, py+35, dark);
+    fillR(px+14, py+23, px+22, py+35, dark);
+    fillR(px+27, py+23, px+35, py+35, dark);
+    fillR(px+39, py+23, px+46, py+35, dark);
+    // Big paws
+    fillR(px+1, py+34, px+11, py+36, gold);
+    fillR(px+13, py+34, px+23, py+36, gold);
+    fillR(px+26, py+34, px+36, py+36, gold);
+    fillR(px+38, py+34, px+47, py+36, gold);
+    // Claws
+    setP(px+3, py+35, 0xFFFFFFFF); setP(px+9, py+35, 0xFFFFFFFF);
+    setP(px+15, py+35, 0xFFFFFFFF); setP(px+21, py+35, 0xFFFFFFFF);
+    setP(px+28, py+35, 0xFFFFFFFF); setP(px+34, py+35, 0xFFFFFFFF);
+    setP(px+40, py+35, 0xFFFFFFFF); setP(px+45, py+35, 0xFFFFFFFF);
+    
+    // ===== MASSIVE TAIL =====
+    setP(px-3, py+9, gold); setP(px-5, py+8, gold);
+    setP(px-7, py+7, gold); setP(px-9, py+6, gold);
+    setP(px-11, py+5, gold); setP(px-12, py+4, gold);
+    setP(px-13, py+3, gold); setP(px-14, py+2, gold);
+    setP(px-14, py+1, mane); setP(px-14, py, mane);
+    setP(px-13, py, mane);  setP(px-15, py+1, mane);
+    setP(px-15, py, mane);  setP(px-14, py-1, mane);
+    setP(px-13, py-1, mane);
+    
+    // Selected highlight
+    if(e.selected){
+      const hl = 0xFF4444FF;
+      const bx=px-16, by=py-22, bx2=px+64, by2=py+37;
+      for(let dx=bx;dx<=bx2;dx++){ setP(dx, by, hl); setP(dx, by2, hl); }
+      for(let dy=by;dy<=by2;dy++){ setP(bx, dy, hl); setP(bx2, dy, hl); }
+    }
+    return;
+  }
+  if(e.type === T.GORILLA){
+    // Big muscular gorilla - bigger than monkey, imposing!
+    const dark = 0xFF444444;         // dark grey body
+    const light = 0xFF646464;        // lighter grey chest
+    const darker = 0xFF222222;       // very dark for details
+    const eyeColor = 0xFF000000;
+    
+    // LEGS (thick legs)
+    fillR(px+3, py+14, px+9, py+20, darker);
+    fillR(px+14, py+14, px+20, py+20, darker);
+    // Feet
+    fillR(px+2, py+19, px+10, py+20, dark);
+    fillR(px+13, py+19, px+21, py+20, dark);
+    
+    // BIG BODY (barrel chest)
+    fillR(px, py+2, px+23, py+14, dark);
+    // Lighter chest
+    fillR(px+6, py+5, px+17, py+12, light);
+    
+    // BIG ARMS (gorilla's signature feature - massive arms)
+    fillR(px-8, py+3, px-1, py+8, dark);     // left upper arm
+    fillR(px-12, py+8, px-3, py+11, dark);   // left forearm
+    setP(px-12, py+10, darker); setP(px-13, py+11, darker);
+    setP(px-11, py+12, darker);              // left hand
+    
+    fillR(px+24, py+3, px+31, py+8, dark);    // right upper arm
+    fillR(px+27, py+8, px+35, py+11, dark);   // right forearm
+    setP(px+35, py+10, darker); setP(px+36, py+11, darker);
+    setP(px+34, py+12, darker);               // right hand
+    
+    // HEAD (big, with brow ridge)
+    fillR(px+4, py-6, px+19, py+3, dark);
+    fillR(px+3, py-4, px+4, py+1, dark);
+    fillR(px+19, py-4, px+20, py+1, dark);
+    
+    // Brow ridge
+    fillR(px+5, py-5, px+18, py-4, darker);
+    
+    // EYES (deep set under brow)
+    setP(px+8, py-3, eyeColor);
+    setP(px+15, py-3, eyeColor);
+    setP(px+7, py-3, 0xFFFFFFFF);  // eye white
+    setP(px+14, py-3, 0xFFFFFFFF);
+    
+    // NOSE (big flat nose)
+    setP(px+10, py, 0xFF222222);
+    setP(px+11, py, 0xFF222222);
+    setP(px+12, py, 0xFF222222);
+    setP(px+13, py, 0xFF222222);
+    
+    // MOUTH
+    setP(px+9, py+2, darker);
+    setP(px+10, py+2, darker);
+    setP(px+11, py+2, darker);
+    setP(px+12, py+2, darker);
+    setP(px+13, py+2, darker);
+    setP(px+14, py+2, darker);
+    
+    // EARS (small round ears)
+    setP(px+2, py-3, dark);
+    setP(px+2, py-2, dark);
+    setP(px+20, py-3, dark);
+    setP(px+20, py-2, dark);
+    
+    // Selected highlight
+    if(e.selected){
+      const hl = 0xFF4444FF;
+      const bx=px-14, by=py-7, bx2=px+37, by2=py+21;
+      for(let dx=bx;dx<=bx2;dx++){ setP(dx, by, hl); setP(dx, by2, hl); }
+      for(let dy=by;dy<=by2;dy++){ setP(bx, dy, hl); setP(bx2, dy, hl); }
+    }
+    return;
+  }
+  if(e.type === T.ZOMBIE){
+    // 🧟 Minecraft Zombie - blocky pixel art, green skin, blue shirt
+    const skin    = 0xFF5D8A5D;  // Minecraft zombie green skin
+    const skinDk  = 0xFF3D6A3D;  // darker skin shade
+    const shirt   = 0xFFDC5028;  // blue shirt (ABGR: B=220, G=80, R=40)
+    const shirtDk = 0xFFAA3719;  // darker blue shirt (ABGR: B=170, G=55, R=25)
+    const pants   = 0xFF501E14;  // dark navy pants (ABGR: B=80, G=30, R=20)
+    const pantsDk = 0xFF37120A;  // darker pants (ABGR: B=55, G=18, R=10)
+    const black   = 0xFF000000;  // black for eyes/mouth
+    
+    // ===== LEGS (two blocky rectangles, 6px wide each) =====
+    fillR(px+3,  py+14, px+9,  py+19, pants);
+    fillR(px+12, py+14, px+18, py+19, pants);
+    // Shoe bottoms
+    fillR(px+3,  py+18, px+9,  py+19, pantsDk);
+    fillR(px+12, py+18, px+18, py+19, pantsDk);
+    // Inner leg gap
+    fillR(px+9,  py+15, px+12, py+18, pantsDk);
+    
+    // ===== BODY (8px wide torso at Minecraft 2x) =====
+    fillR(px+3,  py+2,  px+18, py+14, shirt);
+    // Shirt collar line
+    fillR(px+8,  py+2,  px+13, py+3,  shirtDk);
+    // Shirt bottom trim
+    fillR(px+3,  py+13, px+18, py+14, shirtDk);
+    
+    // ===== ARMS (sticking straight out - 6px wide) =====
+    // Left arm
+    fillR(px-7,  py+4,  px+2,  py+12, shirt);
+    fillR(px-7,  py+12, px+2,  py+13, shirtDk);
+    // Left hand (skin)
+    fillR(px-8,  py+13, px+1,  py+14, skin);
+    
+    // Right arm
+    fillR(px+19, py+4,  px+28, py+12, shirt);
+    fillR(px+19, py+12, px+28, py+13, shirtDk);
+    // Right hand (skin)
+    fillR(px+20, py+13, px+29, py+14, skin);
+    
+    // ===== HEAD (big square 16x14 block) =====
+    fillR(px+2,  py-7,  px+19, py+2,  skin);
+    // Head top
+    fillR(px+3,  py-7,  px+18, py-6,  skinDk);
+    
+    // ===== FACE: EYES (two 3x2 black rectangles, 2px gap) =====
+    fillR(px+5,  py-4,  px+7,  py-3,  black);   // left eye
+    fillR(px+12, py-4,  px+14, py-3,  black);   // right eye
+    
+    // ===== FACE: MOUTH (wide black rectangle with missing tooth) =====
+    fillR(px+4,  py+1,  px+17, py+2,  black);   // 14px wide mouth
+    // Missing tooth gap (classic Minecraft zombie!)
+    setP(px+9,  py+1,  skin);
+    setP(px+10, py+1,  skin);
+    
+    // ===== HEAD SHADING (3D blocky effect) =====
+    fillR(px+17, py-7,  px+19, py+2,  skinDk);  // right side shadow
+    fillR(px+2,  py+1,  px+14, py+2,  skinDk);  // bottom shadow
+    
+    // Selected highlight
+    if(e.selected){
+      const hl = 0xFFFF4444;
+      const bx=px-9, by=py-9, bx2=px+30, by2=py+20;
+      for(let dx=bx;dx<=bx2;dx++){ setP(dx, by, hl); setP(dx, by2, hl); }
+      for(let dy=by;dy<=by2;dy++){ setP(bx, dy, hl); setP(bx2, dy, hl); }
+    }
+    return;
+  }
+  if(e.type === T.PENGUIN){
+    // 🐧 BIGGER penguin - black back, white belly, orange beak/feet
+    const black   = 0xFF222222;
+    const white   = 0xFFFFFFFF;
+    const gray    = 0xFF666666;
+    const orange  = 0xFF44AAFF;  // ABGR: B=44, G=AA, R=FF -> orange
+    const darkOrg = 0xFF2288DD;
+    
+    // BODY (big black oval)
+    fillR(px,    py+3,  px+31, py+23, black);
+    // White belly
+    fillR(px+7,  py+6,  px+24, py+20, white);
+    // Belly outline (gray shading)
+    fillR(px+6,  py+6,  px+8,  py+19, gray);
+    fillR(px+24, py+6,  px+26, py+19, gray);
+    
+    // HEAD (big black circle on top)
+    fillR(px+5,  py-7,  px+26, py+4,  black);
+    // White face patch
+    fillR(px+9,  py-4,  px+22, py+2,  white);
+    // Eyes (bigger black dots)
+    fillR(px+11, py-2,  px+14, py,    black);
+    fillR(px+19, py-2,  px+22, py,    black);
+    // Eye shines
+    fillR(px+14, py-4,  px+15, py-3,  black);
+    fillR(px+17, py-4,  px+18, py-3,  black);
+    
+    // BEAK (orange triangle - bigger)
+    fillR(px+12, py+2,  px+19, py+4,  orange);
+    fillR(px+13, py+1,  px+18, py+2,  orange);
+    setP(px+14, py,     orange);
+    setP(px+17, py,     orange);
+    setP(px+15, py+1,  darkOrg);
+    setP(px+16, py+1,  darkOrg);
+    // Beak line
+    fillR(px+14, py+3,  px+17, py+4,  darkOrg);
+    
+    // WINGS (big flipper-like)
+    // Left wing
+    fillR(px-6,  py+6,  px-1,  py+16, black);
+    fillR(px-8,  py+7,  px-4,  py+15, gray);
+    fillR(px-9,  py+9,  px-7,  py+13, gray);
+    // Right wing
+    fillR(px+32, py+6,  px+37, py+16, black);
+    fillR(px+35, py+7,  px+39, py+15, gray);
+    fillR(px+38, py+9,  px+40, py+13, gray);
+    
+    // FEET (big orange webbed)
+    fillR(px+6,  py+23, px+13, py+27, orange);
+    fillR(px+19, py+23, px+26, py+27, orange);
+    // Foot webbing
+    fillR(px+5,  py+26, px+14, py+27, orange);
+    fillR(px+18, py+26, px+27, py+27, orange);
+    fillR(px+13, py+24, px+14, py+25, orange);
+    fillR(px+18, py+24, px+19, py+25, orange);
+    
+    // Selected highlight
+    if(e.selected){
+      const hl = 0xFFFF4444;
+      const bx=px-10, by=py-8, bx2=px+41, by2=py+28;
+      for(let dx=bx;dx<=bx2;dx++){ setP(dx, by, hl); setP(dx, by2, hl); }
+      for(let dy=by;dy<=by2;dy++){ setP(bx, dy, hl); setP(bx2, dy, hl); }
+    }
+    return;
+  }
+  if(e.type === T.FOOTBALL){
+    // ⚽ FIFA World Cup 2026 official match ball
+    // Colors in ABGR format: USA/Canada/Mexico host colors
+    const white    = 0xFFFFFFFF;
+    const red      = 0xFF1E1EDC;   // ABGR: B=1E(30), G=1E(30), R=DC(220) -> red
+    const blue     = 0xFFC82814;   // ABGR: B=C8(200), G=28(40), R=14(20) -> blue
+    const navy     = 0xFF641E0A;   // dark navy blue
+    const gold     = 0xFF1EC8E6;   // ABGR: B=1E(30), G=C8(200), R=E6(230) -> gold
+    const gray     = 0xFF888888;
+    const dark     = 0xFF444444;
+    
+    // Shadow below ball
+    fillR(px+3,  py+9,  px+20, py+11, dark);
+    
+    // ===== WHITE BALL BASE (circle shape) =====
+    fillR(px+2,  py+1,  px+21, py+9,  white);
+    fillR(px+3,  py,    px+20, py+1,  white);
+    fillR(px+3,  py+9,  px+20, py+10, white);
+    fillR(px+1,  py+2,  px+2,  py+8,  white);
+    fillR(px+21, py+2,  px+22, py+8,  white);
+    
+    // Ball outline
+    setP(px+1,  py+2,  gray); setP(px,    py+3,  gray);
+    setP(px,    py+4,  gray); setP(px,    py+5,  gray);
+    setP(px,    py+6,  gray); setP(px+1,  py+7,  gray);
+    setP(px+22, py+2,  gray); setP(px+23, py+3,  gray);
+    setP(px+23, py+4,  gray); setP(px+23, py+5,  gray);
+    setP(px+23, py+6,  gray); setP(px+22, py+7,  gray);
+    setP(px+2,  py,    gray); setP(px+3,  py,    gray);
+    setP(px+4,  py,    gray); setP(px+5,  py,    gray);
+    setP(px+6,  py,    gray); setP(px+7,  py,    gray);
+    setP(px+16, py,    gray); setP(px+17, py,    gray);
+    setP(px+18, py,    gray); setP(px+19, py,    gray);
+    setP(px+20, py,    gray); setP(px+21, py,    gray);
+    setP(px+2,  py+10, gray); setP(px+3,  py+10, gray);
+    setP(px+4,  py+10, gray); setP(px+5,  py+10, gray);
+    setP(px+18, py+10, gray); setP(px+19, py+10, gray);
+    setP(px+20, py+10, gray); setP(px+21, py+10, gray);
+    
+    // ===== RED WING (USA) - sweeping curve left side =====
+    fillR(px+2,  py+2,  px+6,  py+4,  red);
+    fillR(px+3,  py+5,  px+5,  py+8,  red);
+    setP(px+2,  py+5,  red); setP(px+6,  py+5,  red);
+    setP(px+6,  py+6,  red);
+    
+    // ===== BLUE WING (Canada) - sweeping curve right side =====
+    fillR(px+17, py+2,  px+21, py+4,  blue);
+    fillR(px+18, py+5,  px+20, py+8,  blue);
+    setP(px+17, py+5,  blue); setP(px+21, py+5,  blue);
+    setP(px+17, py+6,  blue);
+    
+    // ===== NAVY STRIPE (Mexico) - center vertical =====
+    fillR(px+9,  py+2,  px+14, py+3,  navy);
+    fillR(px+10, py+4,  px+13, py+7,  navy);
+    fillR(px+9,  py+7,  px+14, py+8,  navy);
+    setP(px+9,  py+4,  navy); setP(px+14, py+4,  navy);
+    setP(px+9,  py+5,  navy); setP(px+14, py+5,  navy);
+    setP(px+9,  py+6,  navy); setP(px+14, py+6,  navy);
+    
+    // ===== GOLD STAR / ACCENT =====
+    setP(px+11, py+4,  gold);
+    setP(px+12, py+4,  gold);
+    setP(px+11, py+5,  gold);
+    setP(px+12, py+5,  gold);
+    
+    // ===== "26" TEXT at center =====
+    setP(px+10, py+3,  white);
+    setP(px+13, py+3,  white);
+    
+    // ===== HIGHLIGHT SHINE (glossy look) =====
+    setP(px+4,  py+2,  0xFFDDDDDD);
+    setP(px+5,  py+2,  0xFFDDDDDD);
+    setP(px+4,  py+3,  0xFFDDDDDD);
+    
+    // Selected highlight
+    if(e.selected){
+      const hl = 0xFFFF4444;
+      const bx=px-1, by=py-1, bx2=px+24, by2=py+11;
+      for(let dx=bx;dx<=bx2;dx++){ setP(dx, by, hl); setP(dx, by2, hl); }
+      for(let dy=by;dy<=by2;dy++){ setP(bx, dy, hl); setP(bx2, dy, hl); }
+    }
+    return;
+  }
+  
+  // Generic fallback for any unhandled entity
+  const size = CELL * 3;
+  for(let dy=0;dy<size && py+dy<canvas.height;dy++){
+    const row = py + dy;
+    const off = row * w + px;
+    for(let dx=0;dx<size && px+dx<canvas.width;dx++){
+      if(off+dx < h32.length) h32[off+dx] = c;
+    }
+  }
+}
+
+// =====================================================
+// SIMULATION
+// =====================================================
+let simStep = 0;
+const DIRS = [[0,1],[0,-1],[-1,0],[1,0],[-1,1],[1,1],[-1,-1],[1,-1]];
+
+function updateSimulation(){
+  // Process grid bottom-to-top, alternating x direction
+  const altDir = (simStep & 1) === 0;
+  moved.fill(0);
+  
+  for(let y=ROWS-1;y>=0;y--){
+    const startX = altDir ? 0 : COLS-1;
+    const endX = altDir ? COLS-1 : 0;
+    const inc = altDir ? 1 : -1;
+    for(let x=startX; (altDir ? x<=endX : x>=endX); x+=inc){
+      const i = idx(x,y);
+      if(moved[i]) continue;
+      // Skip cells occupied by entities
+      if(entityMap[i] !== 0) continue;
+      const t = grid[i];
+      if(t === T.EMPTY) continue;
+      
+      const prop = MATERIAL_PROPS[t];
+      if(!prop) continue;
+      
+      switch(prop.state){
+        case 'powder': updatePowder(x,y,t); break;
+        case 'liquid': updateLiquid(x,y,t); break;
+        case 'gas': updateGas(x,y,t); break;
+        case 'living': updateLiving(x,y,t); break;
+        case 'solid': updateSolid(x,y,t); break;
+      }
+    }
+  }
+  
+  // Update entities
+  updateEntities();
+  
+  simStep++;
+  
+  // Periodically age gases
+  if(simStep % 2 === 0){
+    for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
+      const i = idx(x,y);
+      const t = grid[i];
+      const prop = MATERIAL_PROPS[t];
+      if(prop && prop.lifespan){
+        extra[i]++;
+        if(extra[i] >= prop.lifespan) grid[i] = T.EMPTY;
+      }
+    }
+  }
+  
+  // Spawn insects from grass (rarely)
+  if(simStep % 60 === 0 && entities.filter(e=>e.type===T.INSECT).length < 10){
+    // Find grass cells randomly
+    for(let attempt=0;attempt<5;attempt++){
+      const rx = Math.floor(Math.random()*COLS);
+      const ry = Math.floor(Math.random()*ROWS);
+      if(g(rx,ry)===T.GRASS && entityMap[idx(rx,ry)]===0){
+        const above = ry>0 ? g(rx,ry-1) : T.EMPTY;
+        if(above === T.EMPTY){
+          createEntity(T.INSECT, rx, ry-1);
+          break;
+        }
+      }
+    }
+  }
+}
+
+function updatePowder(x,y,t){
+  const movedDown = tryMove(x,y,0,1,t) || tryMove(x,y,-1,1,t) || tryMove(x,y,1,1,t);
+  if(!movedDown){
+    // Try settling sideways
+    tryMove(x,y,-1,0,t) || tryMove(x,y,1,0,t);
+  }
+}
+
+function updateLiquid(x,y,t){
+  // Check for material interactions FIRST (before moving away from reactive neighbors)
+  checkInteractions(x,y,t);
+  // If we became obsidian or empty from a reaction, stop
+  if(g(x,y) !== t) return;
+  
+  // Try fall first
+  if(tryMove(x,y,0,1,t)) return;
+  
+  // Spread sideways
+  const spread = LIQUID_SPREAD[t] || 2;
+  let moved = false;
+  // Try diagonal down
+  moved = tryMove(x,y,-1,1,t) || tryMove(x,y,1,1,t);
+  if(moved) return;
+  
+  // Try sideways in alternating pattern
+  if(Math.random()<0.5){
+    for(let d=1;d<=spread;d++){ if(tryMove(x,y,-d,0,t)){ moved=true; break; } }
+    if(!moved) for(let d=1;d<=spread;d++){ if(tryMove(x,y,d,0,t)){ moved=true; break; } }
+  } else {
+    for(let d=1;d<=spread;d++){ if(tryMove(x,y,d,0,t)){ moved=true; break; } }
+    if(!moved) for(let d=1;d<=spread;d++){ if(tryMove(x,y,-d,0,t)){ moved=true; break; } }
+  }
+}
+
+function updateGas(x,y,t){
+  // Rise up
+  if(tryMove(x,y,0,-1,t)) return;
+  tryMove(x,y,-1,-1,t) || tryMove(x,y,1,-1,t);
+  // Disperse sideways
+  tryMove(x,y,-1,0,t) || tryMove(x,y,1,0,t);
+  // Check for material interactions
+  checkInteractions(x,y,t);
+}
+
+function updateLiving(x,y,t){
+  if(t === T.GRASS) updateGrass(x,y);
+  else if(t === T.SAPLING) updateSapling(x,y);
+}
+
+function updateGrass(x,y){
+  // Spread to adjacent dirt (5% chance)
+  if(Math.random() > 0.05) return;
+  const neighbors = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]];
+  // Shuffle
+  for(let i=neighbors.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));[neighbors[i],neighbors[j]]=[neighbors[j],neighbors[i]];
+  }
+  for(const [dx,dy] of neighbors){
+    const nx=x+dx, ny=y+dy;
+    if(inBounds(nx,ny) && g(nx,ny)===T.DIRT && entityMap[idx(nx,ny)]===0){
+      s(nx,ny,T.GRASS);
+      break;
+    }
+  }
+}
+
+function updateSapling(x,y){
+  // Need solid ground below (dirt, grass, or stone)
+  if(y+1 >= ROWS) return;
+  const below = g(x,y+1);
+  if(below !== T.DIRT && below !== T.GRASS && below !== T.STONE && below !== T.MUD) return;
+  // Increase growth rate for better gameplay
+  if(Math.random() > 0.05) return; // 5% chance per tick
+  
+  let hasWater = false;
+  for(let dy=-3;dy<=3 && !hasWater;dy++) for(let dx=-3;dx<=3 && !hasWater;dx++){
+    const nx=x+dx, ny=y+dy;
+    if(inBounds(nx,ny)){
+      const nt = g(nx,ny);
+      if(nt === T.WATER || nt === T.MUD){
+        hasWater = true;
+      }
+    }
+  }
+  if(!hasWater) return;
+  
+  // Grow: replace sapling with wood trunk, add leaves above
+  s(x,y,T.WOOD);
+  for(let h=1;h<=3;h++){
+    if(y-h >= 0 && g(x,y-h) === T.EMPTY) s(x,y-h,T.WOOD);
+  }
+  // Leaves canopy
+  for(let dx=-1;dx<=1;dx++) for(let dy=-2;dy<=0;dy++){
+    const nx=x+dx, ny=y+dy;
+    if(inBounds(nx,ny) && g(nx,ny)===T.EMPTY && Math.random()<0.7) s(nx,ny,T.LEAVES);
+  }
+}
+
+function updateSolid(x,y,t){
+  // Check interactions
+  checkInteractions(x,y,t);
+}
+
+function tryMove(x,y,dx,dy,t){
+  const nx=x+dx, ny=y+dy;
+  if(!inBounds(nx,ny)) return false;
+  const ni = idx(nx,ny);
+  if(grid[ni] !== T.EMPTY) {
+    // Try swapping with powder/liquid below (density)
+    if(dy>0){
+      const nt = grid[ni];
+      const nprop = MATERIAL_PROPS[nt];
+      const tprop = MATERIAL_PROPS[t];
+      if(nprop && nprop.state === 'powder' && tprop && tprop.state === 'liquid'){
+        // Liquid can't push powder up
+        return false;
+      }
+    }
+    return false;
+  }
+  if(entityMap[ni] !== 0) return false;
+  
+  // Move
+  const i = idx(x,y);
+  grid[ni] = t;
+  extra[ni] = extra[i];
+  grid[i] = T.EMPTY;
+  extra[i] = 0;
+  moved[ni] = 1;
+  return true;
+}
+
+// =====================================================
+// MATERIAL INTERACTIONS
+// =====================================================
+function checkInteractions(x,y,t){
+  if(t === T.EMPTY) return;
+  const neighbors = [[-1,0],[1,0],[0,-1],[0,1]];
+  for(const [dx,dy] of neighbors){
+    const nx=x+dx, ny=y+dy;
+    if(!inBounds(nx,ny)) continue;
+    const nt = g(nx,ny);
+    if(nt === T.EMPTY) continue;
+    
+    // Acid dissolves everything
+    if(t === T.ACID || nt === T.ACID){
+      if(nt === T.ACID){
+        // This cell touched acid - dissolve
+        s(x,y,T.EMPTY);
+        return;
+      } else if(t === T.ACID && nt !== T.EMPTY){
+        // Acid touching something - dissolve it
+        s(nx,ny,T.EMPTY);
+        // Acid has chance to be used up
+        if(Math.random()<0.3) s(x,y,T.EMPTY);
+        return;
+      }
+    }
+    
+    // Water + Lava → Obsidian
+    if((t === T.WATER && nt === T.LAVA) || (t === T.LAVA && nt === T.WATER)){
+      s(x,y,T.OBSIDIAN);
+      s(nx,ny,T.OBSIDIAN);
+      return;
+    }
+    
+    // Lava + flammable → Fire
+    if(t === T.LAVA && (nt === T.WOOD || nt === T.LEAVES || nt === T.GRASS || nt === T.SAPLING)){
+      s(nx,ny,T.FIRE);
+      return;
+    }
+    if(nt === T.LAVA && (t === T.WOOD || t === T.LEAVES || t === T.GRASS || t === T.SAPLING)){
+      s(x,y,T.FIRE);
+      return;
+    }
+    
+    // Fire + flammable → spread fire
+    if(t === T.FIRE && (nt === T.WOOD || nt === T.LEAVES || nt === T.GRASS || nt === T.SAPLING)){
+      s(nx,ny,T.FIRE);
+      return;
+    }
+    if(nt === T.FIRE && (t === T.WOOD || t === T.LEAVES || t === T.GRASS || t === T.SAPLING)){
+      s(x,y,T.FIRE);
+      return;
+    }
+    
+    // Fire/Lava melts ice → Water
+    if(nt === T.ICE && (t === T.FIRE || t === T.LAVA)){
+      s(nx, ny, T.WATER);
+      if(t === T.FIRE) s(x, y, T.EMPTY); // fire consumed
+      return;
+    }
+    if(t === T.ICE && (nt === T.FIRE || nt === T.LAVA)){
+      s(x, y, T.WATER);
+      if(nt === T.FIRE) s(nx, ny, T.EMPTY);
+      return;
+    }
+    
+    // Water + Dirt → Mud
+    if((t === T.WATER && nt === T.DIRT) || (t === T.DIRT && nt === T.WATER)){
+      s(x,y,T.MUD);
+      s(nx,ny,T.MUD);
+      return;
+    }
+    
+    // Poison kills living materials
+    if((t === T.POISON && (nt === T.GRASS || nt === T.SAPLING)) ||
+       (nt === T.POISON && (t === T.GRASS || t === T.SAPLING))){
+      s(x,y,T.EMPTY);
+      s(nx,ny,T.EMPTY);
+      return;
+    }
+  }
+}
+
+// Check interactions for entity and adjacent cells
+function checkEntityInteractions(x,y){
+  const checkPos = (cx, cy)=>{
+    if(!inBounds(cx, cy)) return;
+    const nt = g(cx, cy);
+    let damage = 0;
+    if(nt === T.ACID) damage = 8;
+    else if(nt === T.LAVA) damage = 5;
+    else if(nt === T.POISON) damage = 3;
+    else if(nt === T.FIRE) damage = 2;
+    if(damage > 0){
+      const e = getEntityAt(x,y);
+      if(e){
+        e.health -= damage;
+        if(e.health <= 0){
+          // Death effect: turn the spot into ash
+          s(x, y, T.ASH);
+          removeEntity(e.id);
+        }
+      }
+    }
+  };
+  // Check entity's own cell and all 8 neighbors
+  checkPos(x, y);
+  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+    if(dx===0 && dy===0) continue;
+    checkPos(x+dx, y+dy);
+  }
+}
+
+// =====================================================
+// ENTITY UPDATE
+// =====================================================
+function updateEntities(){
+  for(let i=entities.length-1;i>=0;i--){
+    const e = entities[i];
+    e.age++;
+    e.actionCd = Math.max(0, e.actionCd-1);
+    
+    // Check damage from surroundings
+    checkEntityInteractions(e.x, e.y);
+    if(e.health <= 0){ removeEntity(e.id); continue; }
+    
+    // Update based on type
+    switch(e.type){
+      case T.HUMAN: updateHumanPhysics(e); break;
+      case T.COW: applyGravity(e); updateCow(e); break;
+      case T.CHICKEN: applyGravity(e); updateChicken(e); break;
+      case T.SHEEP: applyGravity(e); updateSheep(e); break;
+      case T.PARROT: applyGravity(e); updateParrot(e); break;
+      case T.INSECT: updateInsect(e); break; // no gravity - flyer
+      case T.DOG: applyGravity(e); updateDog(e); break;
+      case T.CAT: applyGravity(e); updateCat(e); break;
+      case T.TURTLE: applyGravity(e); updateTurtle(e); break;
+      case T.MONKEY: applyGravity(e); updateMonkey(e); break;
+      case T.LION: applyGravity(e); updateLion(e); break;
+      case T.GORILLA: applyGravity(e); updateGorilla(e); break;
+      case T.ZOMBIE: applyGravity(e); updateZombie(e); break;
+      case T.FISH: updateFish(e); break;
+      case T.SHARK: updateShark(e); break;
+      case T.PENGUIN: applyGravity(e); updatePenguin(e); break;
+      case T.FOOTBALL: updateFootball(e); break;
+    }
+    
+    // Clean up dead
+    if(e.health <= 0){ removeEntity(e.id); continue; }
+    
+    // Insect lifespan
+    if(e.type === T.INSECT && e.age > 400){ removeEntity(e.id); }
+    
+    // Skip ice sliding for football (has its own physics)
+    if(e.type === T.FOOTBALL) continue;
+    
+    // Ice sliding: slide extra steps if on ice
+    if(e.slide > 0 && e.dir !== 0){
+      e.slide--;
+      if(inBounds(e.x, e.y+1) && g(e.x, e.y+1) === T.ICE){
+        const sx = e.x + e.dir;
+        if(inBounds(sx, e.y) && grid[idx(sx, e.y)] === T.EMPTY && entityMap[idx(sx, e.y)] === 0){
+          entityMoveTo(e, sx, e.y);
+        }
+      }
+    }
+  }
+}
+
+function entityMoveTo(e, nx, ny){
+  if(!inBounds(nx, ny)) return false;
+  const ni = idx(nx, ny);
+  const nt = grid[ni];
+  // Can't move into solid materials, obsidian, ice, or other entities
+  const solidSurface = (nt === T.STONE || nt === T.WOOD || nt === T.LEAVES || 
+                        nt === T.GRASS || nt === T.SAPLING || nt === T.OBSIDIAN || nt === T.ICE);
+  if(solidSurface) return false;
+  
+  // Check if destination has a football - KICK IT!
+  const destEntityId = entityMap[ni];
+  if(destEntityId !== 0){
+    const destEntity = entities.find(ee=>ee.id===destEntityId);
+    if(destEntity && destEntity.type === T.FOOTBALL){
+      // Kick the football in the direction of movement
+      const kickDx = nx - e.x;
+      const kickDy = ny - e.y;
+      destEntity.vx = (destEntity.vx || 0) + kickDx * 4;
+      destEntity.vy = (destEntity.vy || 0) + kickDy * 3 - 1.5; // slight upward arc
+      destEntity.bounces = 5;
+      // Move entity into the football's old position
+      const oi = idx(e.x, e.y);
+      entityMap[oi] = 0;
+      e.x = nx; e.y = ny;
+      entityMap[ni] = e.id;
+      e.dir = kickDx;
+      return true;
+    }
+    return false;
+  }
+  
+  const oi = idx(e.x, e.y);
+  // Clear old position's entity mapping only (leave material underneath)
+  entityMap[oi] = 0;
+  
+  // Set new position
+  e.x = nx; e.y = ny;
+  entityMap[ni] = e.id;
+  e.dir = nx > e.x ? 1 : (nx < e.x ? -1 : e.dir);
+  
+  // Ice sliding: if standing ON ice (below), keep sliding in same direction
+  if(e.dir !== 0 && inBounds(e.x, e.y+1) && g(e.x, e.y+1) === T.ICE && Math.random() < 0.6){
+    e.slide = (e.slide || 0) + 2; // will slide extra steps
+  }
+  
+  return true;
+}
+
+function entityRandomWalk(e, speed){
+  if(e.actionCd > 0) return;
+  const dirs = [[0,1],[0,-1],[1,0],[-1,0]];
+  const d = dirs[Math.floor(Math.random()*4)];
+  if(entityMoveTo(e, e.x+d[0], e.y+d[1])) e.actionCd = speed;
+}
+
+function entityWalkToward(e, tx, ty, speed){
+  if(e.actionCd > 0) return;
+  const dx = Math.sign(tx - e.x);
+  const dy = Math.sign(ty - e.y);
+  if(dx !== 0 && entityMoveTo(e, e.x+dx, e.y)){ e.actionCd = speed; return; }
+  if(dy !== 0 && entityMoveTo(e, e.x, e.y+dy)){ e.actionCd = speed; return; }
+}
+
+function entityFindNearest(type, fromX, fromY){
+  let best = null, bestDist = Infinity;
+  for(const e of entities){
+    if(e.type !== type) continue;
+    const d = Math.abs(e.x-fromX)+Math.abs(e.y-fromY);
+    if(d < bestDist){ bestDist = d; best = e; }
+  }
+  return best;
+}
+
+// Shared gravity physics for all land entities
+function applyGravity(e){
+  if(e.health <= 0) return;
+  // Only apply physics every 2nd frame
+  if((e.age & 1) !== 0) return;
+  
+  const current = g(e.x, e.y);
+  const inWater = (current === T.WATER);
+  
+  // Apply gravity
+  if(e.vy < 3) e.vy += inWater ? 0.3 : 0.6;
+  
+  // Fall vertically
+  const steps = Math.floor(e.vy);
+  for(let s=0; s<steps; s++){
+    const ny = e.y + 1;
+    if(!inBounds(e.x, ny)){ e.vy = 0; break; }
+    const nt = g(e.x, ny);
+    const solid = (nt === T.STONE || nt === T.WOOD || nt === T.LEAVES || 
+                   nt === T.GRASS || nt === T.SAPLING || nt === T.DIRT ||
+                   nt === T.OBSIDIAN ||
+                   nt === T.MEAT || nt === T.FRUIT || nt === T.BREAD ||
+                   nt === T.CAKE || nt === T.CANDY || nt === T.NUTS || nt === T.BANANA);
+    if(solid || entityMap[idx(e.x, ny)] !== 0){
+      e.vy = 0; break;
+    }
+    if(nt === T.EMPTY || nt === T.WATER || nt === T.MUD || nt === T.ASH){
+      if(!entityMoveTo(e, e.x, ny)){ e.vy = 0; break; }
+    } else { e.vy = 0; break; }
+  }
+  
+  // Check if standing on nothing - start falling next tick
+  if(e.vy === 0 && inBounds(e.x, e.y+1)){
+    const nt = g(e.x, e.y+1);
+    if(nt === T.EMPTY || nt === T.WATER) e.vy = 0.1;
+  }
+}
+
+// Human physics
+function updateHumanPhysics(e){
+  if(e.health <= 0) return;
+  
+  // Only apply physics every 2nd frame for performance
+  if((e.age & 1) !== 0) return;
+  
+  const below = g(e.x, e.y+1);
+  const current = g(e.x, e.y);
+  
+  // Check if standing on solid ground (can walk on these)
+  const isGround = (below === T.DIRT || below === T.STONE || below === T.WOOD || 
+                    below === T.LEAVES || below === T.GRASS || below === T.ASH ||
+                    below === T.MUD || below === T.OBSIDIAN || below === T.ICE ||
+                    below === T.MEAT || below === T.FRUIT || below === T.BREAD ||
+                    below === T.CAKE || below === T.CANDY || below === T.NUTS || below === T.BANANA);
+  
+  const onSolidGround = !inBounds(e.x, e.y+1) || 
+    (below === T.STONE || below === T.WOOD || below === T.LEAVES || 
+     below === T.GRASS || below === T.SAPLING || below === T.DIRT ||
+     below === T.OBSIDIAN || below === T.ICE ||
+     below === T.MEAT || below === T.FRUIT || below === T.BREAD ||
+     below === T.CAKE || below === T.CANDY || below === T.NUTS || below === T.BANANA);
+  
+  // Check if in water (buoyancy / slow fall)
+  const inWater = (current === T.WATER);
+  
+  // Apply gravity
+  if(e.vy < 3) e.vy += inWater ? 0.3 : 0.6; // Slower fall in water
+  
+  // Check cell below for vertical movement
+  const steps = Math.floor(e.vy);
+  let fell = false;
+  for(let s=0; s<steps; s++){
+    const ny = e.y + 1;
+    if(!inBounds(e.x, ny)){
+      e.vy = 0;
+      break;
+    }
+    const nt = g(e.x, ny);
+    const solid = (nt === T.STONE || nt === T.WOOD || nt === T.LEAVES || 
+                   nt === T.GRASS || nt === T.SAPLING || 
+                   (nt === T.DIRT && e.vy < 1.5) ||
+                   nt === T.OBSIDIAN ||
+                   nt === T.MEAT || nt === T.FRUIT || nt === T.BREAD ||
+                   nt === T.CAKE || nt === T.CANDY || nt === T.NUTS || nt === T.BANANA);
+    if(solid || entityMap[idx(e.x, ny)] !== 0){
+      e.vy = 0;
+      break;
+    }
+    if(nt === T.EMPTY || nt === T.WATER || nt === T.MUD){
+      if(entityMoveTo(e, e.x, ny)){
+        fell = true;
+      } else {
+        e.vy = 0;
+        break;
+      }
+    } else if(nt === T.DIRT || nt === T.ASH){
+      // Land on top of dirt/ash
+      e.vy = 0;
+      break;
+    } else {
+      e.vy = 0;
+      break;
+    }
+  }
+  
+  // If we didn't fall, check if we're on ground and not in mid-air
+  if(!fell && e.vy === 0){
+    // Check if standing on nothing (should fall next tick)
+    const ny = e.y + 1;
+    if(inBounds(e.x, ny)){
+      const nt = g(e.x, ny);
+      if(nt === T.EMPTY || nt === T.WATER){
+        e.vy = 0.1; // Start falling next tick
+      }
+    }
+  }
+  
+  // Handle horizontal movement from WASD/arrows - applied in game loop
+  // but also handle pushing materials here
+}
+
+// Animal AI behaviors
+function updateCow(e){
+  if(e.actionCd > 0) return;
+  // Eat food if nearby (herbivore: fruit, bread, cake)
+  if(tryEatFood(e, 10, 12, [T.FRUIT, T.BREAD, T.CAKE])) return;
+  // Eat grass
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny) && g(nx,ny)===T.GRASS){
+      s(nx,ny,T.DIRT);
+      e.health = Math.min(100, e.health+10);
+      e.actionCd = 15;
+      return;
+    }
+  }
+  // Seek food
+  if(seekFood(e, 6, [T.FRUIT, T.BREAD, T.CAKE])) return;
+  entityRandomWalk(e, 6);
+}
+
+function updateChicken(e){
+  if(e.actionCd > 0) return;
+  // Eat food if nearby (chicken eats bread & fruit)
+  if(tryEatFood(e, 5, 8, [T.BREAD, T.FRUIT, T.NUTS, T.CAKE])) return;
+  // Peck dirt sometimes
+  if(Math.random()<0.2){
+    for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+      const nx=e.x+dx, ny=e.y+dy;
+      if(inBounds(nx,ny) && g(nx,ny)===T.DIRT && Math.random()<0.3){
+        s(nx,ny,T.EMPTY);
+        e.actionCd = 10;
+        return;
+      }
+    }
+  }
+  // Seek food
+  if(seekFood(e, 5, [T.BREAD, T.FRUIT, T.NUTS, T.CAKE])) return;
+  entityRandomWalk(e, 5);
+}
+
+function updateSheep(e){
+  if(e.actionCd > 0) return;
+  // Eat food if nearby (herbivore: fruit, bread, cake)
+  if(tryEatFood(e, 10, 12, [T.FRUIT, T.BREAD, T.CAKE])) return;
+  // Eat grass like cow
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny) && g(nx,ny)===T.GRASS){
+      s(nx,ny,T.DIRT);
+      e.health = Math.min(100, e.health+10);
+      e.actionCd = 15;
+      return;
+    }
+  }
+  // Seek food
+  if(seekFood(e, 6, [T.FRUIT, T.BREAD, T.CAKE])) return;
+  entityRandomWalk(e, 6);
+}
+
+function updateParrot(e){
+  if(e.actionCd > 0) return;
+  // Eat food if nearby (parrot eats fruit)
+  if(tryEatFood(e, 5, 10, [T.FRUIT, T.BREAD, T.CAKE])) return;
+  // Fly: prefer moving up, then random
+  if(Math.random()<0.4 && entityMoveTo(e, e.x, e.y-1)){ e.actionCd = 4; return; }
+  // Seek food
+  if(seekFood(e, 4, [T.FRUIT, T.BREAD, T.CAKE])) return;
+  entityRandomWalk(e, 5);
+}
+
+function updateInsect(e){
+  if(e.actionCd > 0) return;
+  // Very fast random movement
+  const dirs = [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]];
+  const d = dirs[Math.floor(Math.random()*dirs.length)];
+  if(entityMoveTo(e, e.x+d[0], e.y+d[1])) e.actionCd = 2;
+}
+
+function updateDog(e){
+  if(e.actionCd > 0) return;
+  // Eat food if nearby (carnivore: meat!)
+  if(tryEatFood(e, 8, 8, [T.MEAT, T.CAKE])) return;
+  // Follow nearest human
+  let nearest = null, nearestDist = Infinity;
+  for(const hid of humanIds){
+    const he = entities.find(ee=>ee.id===hid);
+    if(he){
+      const d = Math.abs(he.x-e.x)+Math.abs(he.y-e.y);
+      if(d < nearestDist){ nearestDist = d; nearest = he; }
+    }
+  }
+  if(nearest && nearestDist < 30){
+    entityWalkToward(e, nearest.x, nearest.y, 4);
+  } else {
+    // Seek food
+    if(seekFood(e, 6, [T.MEAT, T.CAKE])) return;
+    entityRandomWalk(e, 6);
+  }
+}
+
+function updateCat(e){
+  if(e.actionCd > 0) return;
+  // Eat food if nearby (carnivore: meat!)
+  if(tryEatFood(e, 6, 10, [T.MEAT, T.CAKE])) return;
+  // Wander, avoid water
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny) && g(nx,ny)===T.WATER){
+      // Move away from water
+      entityMoveTo(e, e.x-dx*2, e.y-dy*2) || entityRandomWalk(e, 8);
+      e.actionCd = 8;
+      return;
+    }
+  }
+  // Seek food
+  if(seekFood(e, 6, [T.MEAT, T.CAKE])) return;
+  entityRandomWalk(e, 7);
+}
+
+function updateTurtle(e){
+  if(e.actionCd > 0) return;
+  // Eat food if nearby (turtle eats fruit)
+  if(tryEatFood(e, 8, 15, [T.FRUIT, T.BREAD, T.CAKE])) return;
+  // Slow movement, can enter water
+  const dirs = [[0,1],[0,-1],[1,0],[-1,0]];
+  const d = dirs[Math.floor(Math.random()*4)];
+  const nx=e.x+d[0], ny=e.y+d[1];
+  if(inBounds(nx,ny)){
+    const nt = g(nx,ny);
+    if(nt === T.EMPTY || nt === T.WATER){
+      if(entityMoveTo(e, nx, ny)) e.actionCd = 10;
+    }
+  }
+}
+
+function updateMonkey(e){
+  if(e.actionCd > 0) return;
+  
+  // 🐒 MONKEYS LOVE BANANAS! Run toward them from far away
+  let bfx=-1, bfy=-1, bfDist=Infinity;
+  for(let dy=-15;dy<=15;dy++) for(let dx=-15;dx<=15;dx++){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny) && g(nx,ny)===T.BANANA){
+      const d=Math.abs(dx)+Math.abs(dy);
+      if(d < bfDist){ bfDist=d; bfx=nx; bfy=ny; }
+    }
+  }
+  // Chase banana! Faster movement (lower cooldown = more frequent steps)
+  if(bfx>=0 && bfDist>1){
+    if(bfDist <= 15){
+      entityWalkToward(e, bfx, bfy, 3); // cooldown 3 = fast running!
+      return;
+    }
+  }
+  
+  // Eat banana if right next to it (bonus: extra healing from bananas!)
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny) && g(nx,ny)===T.BANANA){
+      s(nx,ny,T.EMPTY);
+      e.health = Math.min(100, e.health+18); // banana heals +18!
+      e.actionCd = 6;
+      return;
+    }
+  }
+  
+  // Eat food if nearby (monkey is omnivore - eats everything!)
+  if(tryEatFood(e, 12, 8, [T.FRUIT, T.BREAD, T.MEAT, T.NUTS, T.CAKE, T.CANDY])) return;
+  
+  // Monkey likes to be near trees - find nearest wood/leaves
+  let treeX = -1, treeY = -1, treeDist = Infinity;
+  for(let dy=-8;dy<=8;dy++) for(let dx=-8;dx<=8;dx++){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny)){
+      const nt = g(nx,ny);
+      if(nt === T.WOOD || nt === T.LEAVES){
+        const d = Math.abs(dx)+Math.abs(dy);
+        if(d < treeDist){ treeDist = d; treeX = nx; treeY = ny; }
+      }
+    }
+  }
+  
+  // If near a tree, climb/jump around it
+  if(treeX >= 0 && treeDist < 6){
+    // Move toward tree if far, or climb around it
+    if(treeDist > 2){
+      entityWalkToward(e, treeX, treeY, 4);
+    } else {
+      // Swing around the tree - move in random direction
+      const dirs = [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]];
+      const d = dirs[Math.floor(Math.random()*dirs.length)];
+      entityMoveTo(e, e.x+d[0], e.y+d[1]);
+      e.actionCd = 5;
+    }
+    return;
+  }
+  
+  // Eat grass/fruit
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny) && g(nx,ny)===T.GRASS){
+      s(nx,ny,T.DIRT);
+      e.health = Math.min(100, e.health+10);
+      e.actionCd = 12;
+      return;
+    }
+    if(inBounds(nx,ny) && g(nx,ny)===T.LEAVES){
+      s(nx,ny,T.EMPTY);
+      e.health = Math.min(100, e.health+8);
+      e.actionCd = 10;
+      return;
+    }
+  }
+  
+  // Throw dirt at threats (lava, acid, poison) near it
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,1],[1,1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny)){
+      const nt = g(nx,ny);
+      if(nt === T.LAVA || nt === T.ACID || nt === T.FIRE || nt === T.POISON){
+        // Throw dirt at it
+        s(nx, ny, T.DIRT);
+        e.actionCd = 8;
+        return;
+      }
+    }
+  }
+  
+  // Follow nearest human
+  let nearest = null, nearestDist = Infinity;
+  for(const hid of humanIds){
+    const he = entities.find(ee=>ee.id===hid);
+    if(he){
+      const d = Math.abs(he.x-e.x)+Math.abs(he.y-e.y);
+      if(d < nearestDist && d < 20){ nearestDist = d; nearest = he; }
+    }
+  }
+  if(nearest){
+    entityWalkToward(e, nearest.x, nearest.y, 5);
+    return;
+  }
+  
+  // Seek food (omnivore - seeks all types, but bananas already checked above)
+  if(seekFood(e, 5, [T.FRUIT, T.BREAD, T.MEAT, T.NUTS, T.CAKE, T.CANDY])) return;
+  
+  // Random walk
+  entityRandomWalk(e, 6);
+}
+
+// =====================================================
+// LION - king of the jungle, hunts prey
+// =====================================================
+function updateLion(e){
+  if(e.actionCd > 0) return;
+  
+  // Eat meat if nearby
+  if(tryEatFood(e, 10, 10, [T.MEAT, T.CAKE])) return;
+  
+  // HUNT prey! Lion hunts cows, sheep, chickens, and ZOMBIES!
+  let prey = null, preyDist = Infinity;
+  for(const ee of entities){
+    if(ee.type === T.COW || ee.type === T.SHEEP || ee.type === T.CHICKEN || ee.type === T.PARROT || ee.type === T.ZOMBIE || ee.type === T.PENGUIN){
+      const d = Math.abs(ee.x-e.x)+Math.abs(ee.y-e.y);
+      if(d < preyDist && d < 30){ preyDist = d; prey = ee; }
+    }
+  }
+  
+  if(prey){
+    // ROAR charge! Fast movement toward prey
+    const speed = preyDist < 8 ? 2 : 3; // faster when close!
+    entityWalkToward(e, prey.x, prey.y, speed);
+    // Catch and eat prey on contact
+    if(Math.abs(e.x-prey.x)<=1 && Math.abs(e.y-prey.y)<=1){
+      removeEntity(prey.id);
+      e.health = Math.min(100, e.health+25);
+      e.actionCd = 5;
+    }
+    return;
+  }
+  
+  // Seek food
+  if(seekFood(e, 6, [T.MEAT, T.CAKE])) return;
+  
+  // Random walk (majestic stroll)
+  entityRandomWalk(e, 8);
+}
+
+// =====================================================
+// GORILLA - big, strong, protective of territory
+// =====================================================
+function updateGorilla(e){
+  if(e.actionCd > 0) return;
+  
+  // Eat food if nearby (herbivore)
+  if(tryEatFood(e, 14, 10, [T.FRUIT, T.BREAD, T.CAKE, T.BANANA])) return;
+  
+  // TERRITORIAL - beat chest and scare threats!
+  // If a lion or human or threat is nearby, throw fruit/dirt at them
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,1],[1,1],[-1,-1],[1,-1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny)){
+      const nt = g(nx,ny);
+      // Smash threats with dirt
+      if(nt === T.LAVA || nt === T.ACID || nt === T.FIRE || nt === T.POISON){
+        s(nx, ny, T.DIRT);
+        e.actionCd = 6;
+        return;
+      }
+    }
+  }
+  
+  // Charge at lions and ZOMBIES that get too close!
+  for(const ee of entities){
+    if(ee.type === T.LION || ee.type === T.ZOMBIE){
+      const d = Math.abs(ee.x-e.x)+Math.abs(ee.y-e.y);
+      if(d < 10){
+        // Charge toward the lion to scare it away!
+        entityWalkToward(e, ee.x, ee.y, 3);
+        if(Math.abs(e.x-ee.x)<=2 && Math.abs(e.y-ee.y)<=2){
+          // Push lion back by throwing dirt
+          const dx = Math.sign(ee.x - e.x);
+          const dy = Math.sign(ee.y - e.y);
+          const tx = ee.x + dx, ty = ee.y + dy;
+          if(inBounds(tx, ty) && g(tx, ty) === T.EMPTY && entityMap[idx(tx,ty)]===0){
+            s(tx, ty, T.DIRT);
+          }
+          e.actionCd = 10;
+        }
+        return;
+      }
+    }
+  }
+  
+  // Eat grass/leaves
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny) && g(nx,ny)===T.GRASS){
+      s(nx,ny,T.DIRT);
+      e.health = Math.min(100, e.health+12);
+      e.actionCd = 12;
+      return;
+    }
+    if(inBounds(nx,ny) && g(nx,ny)===T.LEAVES){
+      s(nx,ny,T.EMPTY);
+      e.health = Math.min(100, e.health+10);
+      e.actionCd = 10;
+      return;
+    }
+  }
+  
+  // Follow nearest human (gorillas are friends of humans!)
+  let nearest = null, nearestDist = Infinity;
+  for(const hid of humanIds){
+    const he = entities.find(ee=>ee.id===hid);
+    if(he){
+      const d = Math.abs(he.x-e.x)+Math.abs(he.y-e.y);
+      if(d < nearestDist && d < 25){ nearestDist = d; nearest = he; }
+    }
+  }
+  if(nearest){
+    entityWalkToward(e, nearest.x, nearest.y, 5);
+    return;
+  }
+  
+  // Seek food
+  if(seekFood(e, 5, [T.FRUIT, T.BREAD, T.CAKE, T.BANANA])) return;
+  
+  // Random walk
+  entityRandomWalk(e, 7);
+}
+
+// =====================================================
+// ZOMBIE - shambling undead that hunts living things!
+// =====================================================
+function updateZombie(e){
+  if(e.actionCd > 0) return;
+  
+  // Zombies don't eat food - they eat BRAINS! (attack living entities)
+  
+  // Find nearest living entity to attack (humans, then animals)
+  let prey = null, preyDist = Infinity;
+  for(const ee of entities){
+    if(ee.id === e.id) continue;
+    // Zombies attack humans, cows, sheep, chickens, monkeys, gorillas
+    if(ee.type === T.HUMAN || ee.type === T.COW || ee.type === T.SHEEP || 
+       ee.type === T.CHICKEN || ee.type === T.MONKEY || ee.type === T.GORILLA ||
+       ee.type === T.PARROT || ee.type === T.DOG || ee.type === T.CAT || ee.type === T.TURTLE || ee.type === T.PENGUIN){
+      const d = Math.abs(ee.x-e.x)+Math.abs(ee.y-e.y);
+      if(d < preyDist && d < 25){ preyDist = d; prey = ee; }
+    }
+  }
+  
+  if(prey){
+    // Shamble toward prey (slow but persistent)
+    entityWalkToward(e, prey.x, prey.y, 8);
+    
+    // Attack on contact!
+    if(Math.abs(e.x-prey.x)<=1 && Math.abs(e.y-prey.y)<=1){
+      prey.health -= 15;
+      e.health = Math.min(100, e.health+5);
+      e.actionCd = 5;
+      
+      // If prey dies, zombie feasts!
+      if(prey.health <= 0){
+        removeEntity(prey.id);
+        e.health = Math.min(100, e.health+15);
+      }
+    }
+    return;
+  }
+  
+  // Hunt any animal (wider search)
+  let anyPrey = null, anyDist = Infinity;
+  for(const ee of entities){
+    if(ee.id === e.id) continue;
+    if(ee.type !== T.ZOMBIE && ee.type !== T.SHARK && ee.type !== T.FISH && ee.type !== T.INSECT){
+      const d = Math.abs(ee.x-e.x)+Math.abs(ee.y-e.y);
+      if(d < anyDist && d < 30){ anyDist = d; anyPrey = ee; }
+    }
+  }
+  if(anyPrey){
+    entityWalkToward(e, anyPrey.x, anyPrey.y, 8);
+    return;
+  }
+  
+  // Random shamble
+  entityRandomWalk(e, 10);
+}
+
+function updateFish(e){
+  if(e.actionCd > 0) return;
+  // Grace period after spawning
+  if(e.age < 30) return;
+  // Check if in water - lose health slowly when out of water
+  const ct = g(e.x, e.y);
+  if(ct !== T.WATER){
+    e.health -= 0.3;
+    return;
+  }
+  // Eat food if nearby (fish eats bread & fruit)
+  if(tryEatFood(e, 5, 10, [T.BREAD, T.FRUIT, T.CAKE])) return;
+  // Seek food
+  if(seekFood(e, 4, [T.BREAD, T.FRUIT, T.CAKE])) return;
+  // Random swim - use entityMoveTo for consistent movement
+  const dirs = [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]];
+  const d = dirs[Math.floor(Math.random()*dirs.length)];
+  const nx=e.x+d[0], ny=e.y+d[1];
+  if(inBounds(nx,ny) && entityMap[idx(nx,ny)]===0){
+    const nt = g(nx,ny);
+    // Can only swim into water
+    if(nt === T.WATER){
+      entityMoveTo(e, nx, ny);
+      e.actionCd = 4;
+    }
+  }
+}
+
+function updateShark(e){
+  if(e.actionCd > 0) return;
+  // Grace period after spawning
+  if(e.age < 30) return;
+  // Check if in water - lose health slowly when out
+  const ct = g(e.x, e.y);
+  if(ct !== T.WATER){
+    e.health -= 0.4;
+    return;
+  }
+  
+  // Hunt fish
+  let target = null, targetDist = Infinity;
+  for(const ee of entities){
+    if(ee.type === T.FISH){
+      const d = Math.abs(ee.x-e.x)+Math.abs(ee.y-e.y);
+      if(d < targetDist && d < 25){ targetDist = d; target = ee; }
+    }
+  }
+  
+  if(target){
+    entityWalkToward(e, target.x, target.y, 4);
+    // Eat fish on contact
+    if(Math.abs(e.x-target.x)<=1 && Math.abs(e.y-target.y)<=1){
+      removeEntity(target.id);
+      e.health = Math.min(100, e.health+20);
+    }
+  } else {
+    // Eat food if no fish around (shark eats meat!)
+    if(tryEatFood(e, 8, 10, [T.MEAT, T.CAKE])) return;
+    // Seek food
+    if(seekFood(e, 5, [T.MEAT, T.CAKE])) return;
+    // Random swim
+    const dirs = [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]];
+    const d = dirs[Math.floor(Math.random()*dirs.length)];
+    const nx=e.x+d[0], ny=e.y+d[1];
+    if(inBounds(nx,ny) && entityMap[idx(nx,ny)]===0){
+      const nt = g(nx,ny);
+      if(nt === T.WATER){
+        entityMoveTo(e, nx, ny);
+        e.actionCd = 5;
+      }
+    }
+  }
+}
+
+// =====================================================
+// PENGUIN - waddles on land, swims in water, loves ice!
+// =====================================================
+function updatePenguin(e){
+  if(e.actionCd > 0) return;
+  if(e.age < 20) return; // spawn grace period
+  
+  const ct = g(e.x, e.y);
+  const below = inBounds(e.x, e.y+1) ? g(e.x, e.y+1) : T.EMPTY;
+  const onIce = (below === T.ICE);
+  const inWater = (ct === T.WATER);
+  
+  // In water: penguin can swim (doesn't lose health)
+  if(inWater){
+    // Eat food if nearby
+    if(tryEatFood(e, 6, 10, [T.BREAD, T.FRUIT, T.CAKE])) return;
+    if(seekFood(e, 6, [T.BREAD, T.FRUIT, T.CAKE])) return;
+    // Swim around in water
+    const dirs = [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]];
+    const d = dirs[Math.floor(Math.random()*dirs.length)];
+    const nx=e.x+d[0], ny=e.y+d[1];
+    if(inBounds(nx,ny) && entityMap[idx(nx,ny)]===0 && g(nx,ny) === T.WATER){
+      entityMoveTo(e, nx, ny);
+      e.actionCd = 4;
+    } else {
+      entityRandomWalk(e, 6);
+    }
+    return;
+  }
+  
+  // On land: waddle around
+  // Eat food if nearby
+  if(tryEatFood(e, 6, 10, [T.BREAD, T.FRUIT, T.CAKE])) return;
+  // Seek food
+  if(seekFood(e, 6, [T.BREAD, T.FRUIT, T.CAKE])) return;
+  
+  // If near water, go swim!
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,1],[1,1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny) && g(nx,ny) === T.WATER && entityMap[idx(nx,ny)]===0){
+      entityMoveTo(e, nx, ny);
+      e.actionCd = 5;
+      return;
+    }
+  }
+  
+  // Prefer walking where ground below is ice
+  if(!onIce){
+    for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+      const nx=e.x+dx, ny=e.y+dy;
+      if(inBounds(nx,ny) && entityMap[idx(nx,ny)]===0 && g(nx,ny) === T.EMPTY &&
+         inBounds(nx, ny+1) && g(nx, ny+1) === T.ICE){
+        entityMoveTo(e, nx, ny);
+        e.actionCd = 6;
+        return;
+      }
+    }
+  }
+  
+  // Waddle randomly (slightly faster on ice)
+  entityRandomWalk(e, onIce ? 5 : 7);
+}
+
+// =====================================================
+// FOOTBALL - kickable FIFA World Cup 2026 ball
+// =====================================================
+function updateFootball(e){
+  // Initialize ball physics
+  if(e.vx === undefined) e.vx = 0;
+  if(e.vy === undefined) e.vy = 0;
+  if(e.bounces === undefined) e.bounces = 0;
+  
+  // Apply gravity
+  if(e.vy < 5) e.vy += 0.4;
+  
+  // Apply friction (slow down)
+  e.vx *= 0.92;
+  if(Math.abs(e.vx) < 0.1) e.vx = 0;
+  
+  // Horizontal movement
+  if(e.vx !== 0){
+    const steps = Math.ceil(Math.abs(e.vx));
+    const sign = Math.sign(e.vx);
+    for(let s=0; s<steps && Math.abs(e.vx) > 0.1; s++){
+      const nx = e.x + sign;
+      if(!inBounds(nx, e.y)){ e.vx *= -0.5; break; }
+      const nt = g(nx, e.y);
+      const solidSurface = (nt === T.STONE || nt === T.WOOD || nt === T.LEAVES || 
+                            nt === T.GRASS || nt === T.SAPLING || nt === T.OBSIDIAN || nt === T.ICE);
+      if(solidSurface || entityMap[idx(nx, e.y)] !== 0){
+        e.vx *= -0.5; // bounce off solids
+        break;
+      }
+      if(nt === T.EMPTY || nt === T.WATER || nt === T.MUD || nt === T.ASH || nt === T.DIRT){
+        const oi = idx(e.x, e.y);
+        entityMap[oi] = 0;
+        e.x = nx;
+        entityMap[idx(nx, e.y)] = e.id;
+      } else {
+        e.vx = 0;
+        break;
+      }
+    }
+  }
+  
+  // Vertical movement (with bouncing)
+  if(e.vy !== 0){
+    const steps = Math.ceil(Math.abs(e.vy));
+    const sign = Math.sign(e.vy);
+    for(let s=0; s<steps; s++){
+      const ny = e.y + sign;
+      if(!inBounds(e.x, ny)){ e.vy *= -0.5; e.vy *= 0.6; break; }
+      const nt = g(e.x, ny);
+      const solidSurface = (nt === T.STONE || nt === T.WOOD || nt === T.LEAVES || 
+                            nt === T.GRASS || nt === T.SAPLING || nt === T.OBSIDIAN || nt === T.ICE ||
+                            nt === T.DIRT);
+      if(solidSurface || entityMap[idx(e.x, ny)] !== 0){
+        // Bounce off ground
+        e.vy *= -0.5;
+        if(Math.abs(e.vy) < 0.5) e.vy = 0;
+        // Push the ball up to surface level
+        if(e.bounces > 0) e.bounces--;
+        break;
+      }
+      if(nt === T.EMPTY || nt === T.WATER || nt === T.MUD || nt === T.ASH){
+        const oi = idx(e.x, e.y);
+        entityMap[oi] = 0;
+        e.y = ny;
+        entityMap[idx(e.x, ny)] = e.id;
+      } else {
+        e.vy = 0;
+        break;
+      }
+    }
+  }
+  
+  // Decay bounce count - ball stops when no bounces left and almost stopped
+  if(e.vy === 0 && Math.abs(e.vx) < 0.2 && e.bounces <= 0){
+    e.vx = 0;
+  }
+}
+
+// =====================================================
+// FOOD SYSTEM - shared helpers for all animals
+// =====================================================
+
+// Try to eat food adjacent to the entity. Returns true if food was eaten.
+function tryEatFood(e, healAmount, cooldown, foodTypes){
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny)){
+      const cellType = g(nx,ny);
+      for(const ft of foodTypes){
+        if(cellType === ft){
+          s(nx,ny,T.EMPTY);
+          e.health = Math.min(100, e.health+healAmount);
+          e.actionCd = cooldown;
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Seek nearest food within a range. Returns true if moving toward food.
+function seekFood(e, range, foodTypes){
+  let fx=-1, fy=-1, fDist=Infinity;
+  for(let dy=-range;dy<=range;dy++) for(let dx=-range;dx<=range;dx++){
+    const nx=e.x+dx, ny=e.y+dy;
+    if(inBounds(nx,ny)){
+      const cellType = g(nx,ny);
+      for(const ft of foodTypes){
+        if(cellType === ft){
+          const d=Math.abs(dx)+Math.abs(dy);
+          if(d < fDist){ fDist=d; fx=nx; fy=ny; }
+        }
+      }
+    }
+  }
+  if(fx>=0 && fDist>1 && fDist<=range){
+    entityWalkToward(e, fx, fy, 5);
+    return true;
+  }
+  return false;
+}
+
+// =====================================================
+// HUMAN CONTROL
+// =====================================================
+let keysPressed = {};
+
+function moveHuman(dx, dy){
+  if(selectedHuman < 0 || selectedHuman >= humanIds.length) return;
+  const e = entities.find(ee=>ee.id===humanIds[selectedHuman]);
+  if(!e || e.health <= 0) return;
+  
+  const nx = e.x + dx;
+  const ny = e.y + dy;
+  if(!inBounds(nx, ny)) return;
+  
+  const nt = g(nx, ny);
+  const solidSurface = (nt === T.STONE || nt === T.WOOD || nt === T.LEAVES || 
+                        nt === T.GRASS || nt === T.SAPLING || nt === T.OBSIDIAN);
+  
+  if(solidSurface) return;
+  if(entityMap[idx(nx,ny)] !== 0) return;
+  
+  // Vertical movement (jump/climb) - can climb out of holes
+  if(dy !== 0){
+    // Simple climb: just move up/down if empty or liquid
+    if(nt === T.EMPTY || nt === T.WATER || nt === T.MUD){
+      entityMoveTo(e, nx, ny);
+      if(dy < 0) e.vy = -0.5; // Slight upward velocity for jumps
+      return;
+    }
+    // Can push through dirt/ash when climbing up
+    if(dy < 0 && (nt === T.DIRT || nt === T.ASH)){
+      if(inBounds(nx, ny-1) && g(nx, ny-1) === T.EMPTY && entityMap[idx(nx,ny-1)]===0){
+        s(nx, ny-1, nt);
+        s(nx, ny, T.EMPTY);
+        entityMoveTo(e, nx, ny);
+        return;
+      }
+    }
+    return;
+  }
+  
+  // Walk through passable materials
+  if(nt === T.EMPTY || nt === T.WATER || nt === T.MUD || nt === T.DIRT || nt === T.ASH){
+    // If walking into dirt/ash, displace it upward
+    if((nt === T.DIRT || nt === T.ASH) && inBounds(nx, ny-1) && g(nx, ny-1) === T.EMPTY && entityMap[idx(nx,ny-1)]===0){
+      s(nx, ny-1, nt);
+      s(nx, ny, T.EMPTY);
+    }
+    entityMoveTo(e, nx, ny);
+  }
+}
+
+// =====================================================
+// PLACEMENT
+// =====================================================
+let currentMaterial = T.DIRT;
+let brushSize = 2;
+let isErasing = false;
+let isErasingMode = false;
+let isPlacing = false;
+
+function placeAt(mx, my){
+  const cx = Math.floor(mx / CELL);
+  const cy = Math.floor(my / CELL);
+  const r = brushSize;
+  
+  // If placing an entity (check state instead of value, since food materials have values > HUMAN)
+  if(MATERIAL_PROPS[currentMaterial] && MATERIAL_PROPS[currentMaterial].state === 'entity'){
+    placeEntityAt(cx, cy);
+    return;
+  }
+  
+  for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
+    const d = Math.sqrt(dx*dx+dy*dy);
+    if(d > r+0.5) continue;
+    const px = cx + dx, py = cy + dy;
+    if(!inBounds(px, py)) continue;
+    const i = idx(px, py);
+    if(isErasing || isErasingMode){
+      if(entityMap[i] !== 0) removeEntity(entityMap[i]);
+      grid[i] = T.EMPTY;
+      extra[i] = 0;
+    } else {
+      // Sapling can be placed on dirt
+      if(currentMaterial === T.SAPLING && grid[i] === T.DIRT && entityMap[i] === 0){
+        grid[i] = T.SAPLING;
+      }
+      else if(grid[i] === T.EMPTY && entityMap[i] === 0){
+        grid[i] = currentMaterial;
+      }
+    }
+  }
+}
+
+function placeEntityAt(cx, cy){
+  if(!inBounds(cx, cy)) return;
+  if(entityMap[idx(cx,cy)] !== 0) return;
+  
+  const groundType = g(cx, cy);
+  const isFish = (currentMaterial === T.FISH || currentMaterial === T.SHARK);
+  const isPenguin = (currentMaterial === T.PENGUIN);
+  const isHuman = currentMaterial === T.HUMAN;
+  const isFootball = (currentMaterial === T.FOOTBALL);
+  const isLandAnimal = !isFish && !isHuman && !isFootball;
+  
+  // Fish/shark can be placed anywhere - auto-place water pool
+  if(isFish){
+    const poolSize = currentMaterial === T.SHARK ? 4 : 3;
+    for(let layer=0; layer<5; layer++){
+      for(let dy=-poolSize;dy<=poolSize;dy++) for(let dx=-poolSize;dx<=poolSize;dx++){
+        const nx=cx+dx, ny=cy+dy+layer;
+        if(inBounds(nx,ny) && g(nx,ny)===T.EMPTY && entityMap[idx(nx,ny)]===0){
+          const dist = Math.sqrt(dx*dx+dy*dy);
+          if(dist <= poolSize) s(nx, ny, T.WATER);
+        }
+      }
+    }
+    // Dirt basin to hold the water
+    for(let dx=-poolSize-1;dx<=poolSize+1;dx++){
+      for(let layer=0;layer<2;layer++){
+        const bx=cx+dx, by=cy+5+layer;
+        if(inBounds(bx,by) && g(bx,by)===T.EMPTY && entityMap[idx(bx,by)]===0){
+          s(bx, by, T.DIRT);
+        }
+      }
+    }
+  }
+  // Land animals/humans need walkable ground (including food, stone, obsidian, ice)
+  // Penguins can also be placed in water
+  if(!isFish && !isPenguin && groundType !== T.EMPTY && groundType !== T.DIRT && groundType !== T.GRASS 
+     && groundType !== T.MUD && groundType !== T.ASH
+     && groundType !== T.STONE && groundType !== T.WOOD && groundType !== T.OBSIDIAN
+     && groundType !== T.ICE
+     && groundType !== T.MEAT && groundType !== T.FRUIT && groundType !== T.BREAD
+     && groundType !== T.CAKE && groundType !== T.CANDY && groundType !== T.NUTS && groundType !== T.BANANA) return;
+  // Penguins can go in water too
+  if(isPenguin && groundType !== T.WATER && groundType !== T.EMPTY && groundType !== T.DIRT && groundType !== T.GRASS 
+     && groundType !== T.MUD && groundType !== T.ASH
+     && groundType !== T.STONE && groundType !== T.WOOD && groundType !== T.OBSIDIAN
+     && groundType !== T.ICE
+     && groundType !== T.MEAT && groundType !== T.FRUIT && groundType !== T.BREAD
+     && groundType !== T.CAKE && groundType !== T.CANDY && groundType !== T.NUTS && groundType !== T.BANANA) return;
+  // Football can be placed on any open ground
+  if(isFootball && groundType !== T.EMPTY && groundType !== T.DIRT && groundType !== T.GRASS 
+     && groundType !== T.MUD && groundType !== T.ASH
+     && groundType !== T.STONE && groundType !== T.WOOD && groundType !== T.OBSIDIAN
+     && groundType !== T.ICE
+     && groundType !== T.MEAT && groundType !== T.FRUIT && groundType !== T.BREAD
+     && groundType !== T.CAKE && groundType !== T.CANDY && groundType !== T.NUTS && groundType !== T.BANANA) return;
+  
+  // If placing on ice, put entity above the ice so it stands on top
+  let placeX = cx, placeY = cy;
+  if(groundType === T.ICE && inBounds(cx, cy-1) && g(cx, cy-1) === T.EMPTY && entityMap[idx(cx,cy-1)] === 0){
+    placeY = cy - 1;
+  }
+  
+  if(isHuman){
+    createEntity(T.HUMAN, placeX, placeY);
+  } else {
+    createEntity(currentMaterial, placeX, placeY);
+  }
+}
+
+// =====================================================
+// UI SETUP
+// =====================================================
+function buildSidebar(){
+  const sidebar = document.getElementById('sidebar');
+  sidebar.innerHTML = '';
+  
+  const categories = {
+    tools: 'Tools',
+    food: 'Food',
+    materials: 'Materials',
+    living: 'Living',
+    animals: 'Animals',
+    sports: 'Sports'
+  };
+  
+  const catBtnMap = { tools:[], food:[], materials:[], living:[], animals:[], sports:[] };
+  
+  for(const [id, label] of Object.entries(categories)){
+    const catDiv = document.createElement('div');
+    catDiv.className = 'sb-category';
+    catDiv.textContent = label;
+    sidebar.appendChild(catDiv);
+    
+    const types = Object.keys(MATERIAL_PROPS).filter(k=>{
+      const m = MATERIAL_PROPS[k];
+      return m.cat === id;
+    }).map(Number);
+    
+    for(const t of types){
+      const prop = MATERIAL_PROPS[t];
+      const btn = document.createElement('div');
+      btn.className = 'sb-btn' + (t === currentMaterial ? ' active' : '');
+      btn.dataset.type = t;
+      
+      const swatch = document.createElement('div');
+      swatch.className = 'swatch';
+      swatch.style.background = prop.color;
+      
+      const labelEl = document.createElement('span');
+      labelEl.className = 'label';
+      labelEl.textContent = prop.name;
+      
+      btn.appendChild(swatch);
+      btn.appendChild(labelEl);
+      
+      // Special badges
+      if(t === T.HUMAN){
+        const badge = document.createElement('span');
+        badge.style.cssText = 'font-size:8px;color:#e94560;';
+        badge.textContent = '1/2/3';
+        btn.appendChild(badge);
+      }
+      
+      btn.onclick = ()=>{
+        document.querySelectorAll('.sb-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMaterial = t;
+        isErasing = false;
+        isErasingMode = false;
+      };
+      
+      sidebar.appendChild(btn);
+      catBtnMap[id].push(btn);
+    }
+  }
+  
+  // Brush size control
+  const brushDiv = document.createElement('div');
+  brushDiv.id = 'brush-control';
+  brushDiv.innerHTML = '<label>Brush:</label>';
+  const range = document.createElement('input');
+  range.type = 'range';
+  range.min = 1; range.max = 10; range.value = brushSize;
+  range.oninput = ()=> brushSize = parseInt(range.value);
+  brushDiv.appendChild(range);
+  sidebar.appendChild(brushDiv);
+  
+  // Controls hint
+  const hint = document.createElement('div');
+  hint.id = 'controls-hint';
+  hint.innerHTML = '1/2/3: select human<br>WASD/Arrows: move human<br>E: place material<br>Left-click: place/erase<br>Right-click: erase';
+  sidebar.appendChild(hint);
+  
+  // Info bar
+  const info = document.createElement('div');
+  info.id = 'info-bar';
+  info.textContent = 'Elemental Sandbox v1.0';
+  // ===== ERASER BUTTON =====
+  const eraserDiv = document.createElement('div');
+  eraserDiv.className = 'sb-btn';
+  eraserDiv.id = 'eraser-btn';
+  const eraserSwatch = document.createElement('div');
+  eraserSwatch.className = 'swatch';
+  eraserSwatch.style.cssText = 'background:#e94560;border-color:#e94560;display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;';
+  eraserSwatch.textContent = '✕';
+  const eraserLabel = document.createElement('span');
+  eraserLabel.className = 'label';
+  eraserLabel.textContent = 'Eraser';
+  eraserDiv.appendChild(eraserSwatch);
+  eraserDiv.appendChild(eraserLabel);
+  eraserDiv.onclick = ()=>{
+    document.querySelectorAll('.sb-btn').forEach(b=>b.classList.remove('active'));
+    eraserDiv.classList.add('active');
+    isErasingMode = true;
+    isErasing = false;
+    currentMaterial = T.EMPTY;
+  };
+  // Insert eraser after the tools category buttons (before Materials)
+  const cats = sidebar.querySelectorAll('.sb-category');
+  if(cats.length >= 2) sidebar.insertBefore(eraserDiv, cats[1]);
+  else sidebar.appendChild(eraserDiv);
+  
+  sidebar.appendChild(info);
+}
+
+// =====================================================
+// INPUT
+// =====================================================
+let mouseDown = false;
+let rightMouseDown = false;
+let mouseX = 0, mouseY = 0;
+
+function getCanvasXY(e){
+  const rect = canvas.getBoundingClientRect();
+  return {x: e.clientX - rect.left, y: e.clientY - rect.top};
+}
+
+canvas.onmousedown = (e)=>{
+  const p = getCanvasXY(e);
+  mouseX = p.x; mouseY = p.y;
+  if(e.button === 0){ mouseDown = true; isPlacing = true; placeAt(p.x, p.y); }
+  if(e.button === 2){ rightMouseDown = true; isErasing = true; placeAt(p.x, p.y); isErasing = false; }
+};
+canvas.onmousemove = (e)=>{
+  const p = getCanvasXY(e);
+  mouseX = p.x; mouseY = p.y;
+  if(mouseDown && isPlacing){ isErasing = false; placeAt(p.x, p.y); }
+  if(rightMouseDown){ isErasing = true; placeAt(p.x, p.y); isErasing = false; }
+};
+canvas.onmouseup = (e)=>{
+  if(e.button === 0){ mouseDown = false; isPlacing = false; }
+  if(e.button === 2){ rightMouseDown = false; }
+};
+canvas.onmouseleave = ()=>{ mouseDown = false; rightMouseDown = false; isPlacing = false; };
+canvas.oncontextmenu = (e)=> e.preventDefault();
+
+document.addEventListener('keydown', (e)=>{
+  keysPressed[e.key] = true;
+  
+  // Human selection
+  if(e.key === '1') selectHuman(0);
+  else if(e.key === '2') selectHuman(1);
+  else if(e.key === '3') selectHuman(2);
+  
+  // Space or E to place material in front of selected human
+  if(e.key === ' ' || e.key === 'e'){
+    if(selectedHuman >= 0 && selectedHuman < humanIds.length){
+      const he = entities.find(ee=>ee.id===humanIds[selectedHuman]);
+      if(he && he.health > 0){
+        const px = he.x + he.dir;
+        const py = he.y;
+        if(inBounds(px, py) && g(px, py) === T.EMPTY && entityMap[idx(px,py)]===0){
+          if(MATERIAL_PROPS[currentMaterial] && MATERIAL_PROPS[currentMaterial].state === 'entity') s(px, py, T.WOOD);
+          else s(px, py, currentMaterial);
+        }
+      }
+    }
+    e.preventDefault();
+  }
+  
+  // Prevent WASD from scrolling/typing
+  if(e.key === 'w' || e.key === 'W' || e.key === 'a' || e.key === 'A' || 
+     e.key === 's' || e.key === 'S' || e.key === 'd' || e.key === 'D' ||
+     e.key === 'ArrowUp' || e.key === 'ArrowDown' || 
+     e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
+    e.preventDefault();
+  }
+  
+  // Pause
+  if(e.key === 'p' || e.key === 'P') paused = !paused;
+});
+
+document.addEventListener('keyup', (e)=>{ keysPressed[e.key] = false; });
+
+function selectHuman(idx){
+  humanIds.forEach((id,i)=>{
+    const e = entities.find(ee=>ee.id===id);
+    if(e){
+      e.selected = (i === idx);
+    }
+  });
+  selectedHuman = (idx < humanIds.length) ? idx : -1;
+}
+
+// =====================================================
+// MAIN LOOP
+// =====================================================
+let paused = false;
+let frameCount = 0;
+
+function gameLoop(){
+  if(!paused){
+    // Run 2 simulation steps per frame
+    for(let i=0;i<2;i++) updateSimulation();
+    
+    // Handle held keys for continuous human movement
+    if(keysPressed['w'] || keysPressed['W'] || keysPressed['ArrowUp']) moveHuman(0, -1);
+    if(keysPressed['s'] || keysPressed['S'] || keysPressed['ArrowDown']) moveHuman(0, 1);
+    if(keysPressed['a'] || keysPressed['A'] || keysPressed['ArrowLeft']) moveHuman(-1, 0);
+    if(keysPressed['d'] || keysPressed['D'] || keysPressed['ArrowRight']) moveHuman(1, 0);
+    
+    // Continuous placement while holding mouse button
+    if(mouseDown && (frameCount % 3 === 0)){
+      if(isErasingMode) isErasing = true;
+      placeAt(mouseX, mouseY);
+      if(isErasingMode) isErasing = false;
+    }
+    if(rightMouseDown && (frameCount % 3 === 0)){
+      isErasing = true;
+      placeAt(mouseX, mouseY);
+      isErasing = false;
+    }
+  }
+  
+  render();
+  frameCount++;
+  requestAnimationFrame(gameLoop);
+}
+
+// =====================================================
+// INIT
+// =====================================================
+resizeCanvas();
+buildSidebar();
+gameLoop();
+
+window.addEventListener('resize', ()=>{
+  const savedEntities = entities.slice();
+  entities = [];
+  humanIds = [];
+  resizeCanvas();
+  for(const e of savedEntities){
+    if(inBounds(e.x, e.y)){
+      if(e.type === T.HUMAN){
+        // Recreate human to get proper entity management
+        createEntity(T.HUMAN, e.x, e.y);
+      } else {
+        grid[idx(e.x, e.y)] = e.type;
+        entityMap[idx(e.x, e.y)] = e.id;
+        entities.push(e);
+        if(e.type === T.HUMAN) humanIds.push(e.id);
+      }
+    }
+  }
+  if(humanIds.length > 0){
+    selectedHuman = 0;
+    const he = entities.find(ee=>ee.id===humanIds[0]);
+    if(he) he.selected = true;
+  } else selectedHuman = -1;
+  buildPalette();
+  imageData = ctx.createImageData(canvas.width, canvas.height);
+});
+</script>
+</body>
+</html>
